@@ -28,36 +28,29 @@
 
 #include "sfDevINA228.h"
 
-// INA228 calibration scale constant.
-static const float kINA228CalScale = 13107.2e6f;
-
-// INA228 shunt voltage LSB in volts.
-static const float kINA228ShuntLSBDefault = 312.5e-9f;  // ADCRANGE = 0
-static const float kINA228ShuntLSBReduced = 78.125e-9f;  // ADCRANGE = 1
-
-// INA228 bus voltage LSB in volts.
-static const float kINA228BusLSB = 195.3125e-6f;
-
-// INA228 die temperature LSB in degrees C.
-static const float kINA228TempLSB = 7.8125e-3f;
-
 // ========================= Calibration ======================================
 
-bool sfDevINA228::calibrate(float shuntResOhms, float maxCurrent_A)
+sfTkError_t sfDevINA228::calibrate(float shuntResOhms, float maxCurrentA)
 {
-    if (!_theBus || shuntResOhms <= 0.0f || maxCurrent_A <= 0.0f)
-        return false;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    if (shuntResOhms <= 0.0f || maxCurrentA <= 0.0f)
+        return ksfTkErrFail;
 
     _shuntRes = shuntResOhms;
 
     // CURRENT_LSB = MaxCurrent / 2^19  (20-bit ADC, positive half of range)
-    _currentLSB = maxCurrent_A / 524288.0f;
+    _currentLSB = maxCurrentA / kCurrentFullScale;
 
     // SHUNT_CAL = 13107.2 x 10^6 x CURRENT_LSB x Rshunt
-    float calValue = kINA228CalScale * _currentLSB * _shuntRes;
+    float calValue = kCalScale * _currentLSB * _shuntRes;
 
-    // If ADCRANGE = 1, multiply by 4.
-    _adcRange = getADCRange();
+    // If ADCRANGE = 1, multiply by 4. Refresh the cached range from the device first.
+    sfTkError_t rc = getADCRange(_adcRange);
+    if (rc != ksfTkErrOk)
+        return rc;
+
     if (_adcRange)
         calValue *= 4.0f;
 
@@ -71,77 +64,88 @@ bool sfDevINA228::calibrate(float shuntResOhms, float maxCurrent_A)
 
 // ========================= Measurements (Engineering Units) =================
 
-float sfDevINA228::getShuntVoltage_mV(void)
+sfTkError_t sfDevINA228::getShuntVoltage_mV(float &milliVolts)
 {
-    int32_t raw = getShuntVoltageRaw();
+    int32_t raw = 0;
+    sfTkError_t rc = getShuntVoltageRaw(raw);
+    if (rc != ksfTkErrOk)
+        return rc;
 
-    // Select LSB based on ADC range.
-    float lsb = _adcRange ? kINA228ShuntLSBReduced : kINA228ShuntLSBDefault;
-
-    // Convert to millivolts (LSB is in volts).
-    return (float)raw * lsb * 1000.0f;
+    // Select LSB based on ADC range, then convert to millivolts (LSB is in volts).
+    float lsb = _adcRange ? kShuntLSBReduced : kShuntLSBDefault;
+    milliVolts = (float)raw * lsb * 1000.0f;
+    return ksfTkErrOk;
 }
 
-float sfDevINA228::getBusVoltage_V(void)
+sfTkError_t sfDevINA228::getBusVoltage_V(float &volts)
 {
-    uint32_t raw = getBusVoltageRaw();
+    uint32_t raw = 0;
+    sfTkError_t rc = getBusVoltageRaw(raw);
+    if (rc != ksfTkErrOk)
+        return rc;
 
-    return (float)raw * kINA228BusLSB;
+    volts = (float)raw * kBusLSB;
+    return ksfTkErrOk;
 }
 
-float sfDevINA228::getCurrent_A(void)
+sfTkError_t sfDevINA228::getCurrent_A(float &amps)
 {
-    int32_t raw = getCurrentRaw();
+    int32_t raw = 0;
+    sfTkError_t rc = getCurrentRaw(raw);
+    if (rc != ksfTkErrOk)
+        return rc;
 
-    return (float)raw * _currentLSB;
+    amps = (float)raw * _currentLSB;
+    return ksfTkErrOk;
 }
 
-float sfDevINA228::getPower_W(void)
+sfTkError_t sfDevINA228::getPower_W(float &watts)
 {
-    uint32_t raw = getPowerRaw();
+    uint32_t raw = 0;
+    sfTkError_t rc = getPowerRaw(raw);
+    if (rc != ksfTkErrOk)
+        return rc;
 
     // Power LSB = 3.2 x CURRENT_LSB.
-    return (float)raw * 3.2f * _currentLSB;
+    watts = (float)raw * kPowerLSBScale * _currentLSB;
+    return ksfTkErrOk;
 }
 
-float sfDevINA228::getDieTemp_C(void)
+sfTkError_t sfDevINA228::getDieTemp_C(float &celsius)
 {
-    if (!_theBus)
-        return 0.0f;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
     uint16_t raw = 0;
-    if (_theBus->readRegister(ksfINA2XXRegDieTemp, raw) != ksfTkErrOk)
-        return 0.0f;
+    sfTkError_t rc = _theBus->readRegister(kRegDieTemp, raw);
+    if (rc != ksfTkErrOk)
+        return rc;
 
     // DIETEMP is a 16-bit two's complement value.
-    int16_t signedRaw = (int16_t)raw;
-
-    return (float)signedRaw * kINA228TempLSB;
+    celsius = (float)((int16_t)raw) * kTempLSB;
+    return ksfTkErrOk;
 }
 
 // ========================= Energy & Charge ==================================
 
-double sfDevINA228::getEnergy_J(void)
+sfTkError_t sfDevINA228::getEnergy_J(double &joules)
 {
-    if (!_theBus)
-        return 0.0;
-
     uint64_t raw = 0;
-    if (_readRegister40(ksfINA2XXRegEnergy, raw) != ksfTkErrOk)
-        return 0.0;
+    sfTkError_t rc = readRegister40(kRegEnergy, raw);
+    if (rc != ksfTkErrOk)
+        return rc;
 
     // Energy LSB = 16 x 3.2 x CURRENT_LSB.
-    return (double)raw * 16.0 * 3.2 * (double)_currentLSB;
+    joules = (double)raw * kEnergyLSBScale * (double)_currentLSB;
+    return ksfTkErrOk;
 }
 
-double sfDevINA228::getCharge_C(void)
+sfTkError_t sfDevINA228::getCharge_C(double &coulombs)
 {
-    if (!_theBus)
-        return 0.0;
-
     uint64_t raw = 0;
-    if (_readRegister40(ksfINA2XXRegCharge, raw) != ksfTkErrOk)
-        return 0.0;
+    sfTkError_t rc = readRegister40(kRegCharge, raw);
+    if (rc != ksfTkErrOk)
+        return rc;
 
     // CHARGE is a 40-bit two's complement value.
     int64_t signedRaw = (int64_t)raw;
@@ -150,71 +154,62 @@ double sfDevINA228::getCharge_C(void)
         signedRaw |= ~(((int64_t)1 << 40) - 1);
 
     // Charge LSB = CURRENT_LSB.
-    return (double)signedRaw * (double)_currentLSB;
+    coulombs = (double)signedRaw * (double)_currentLSB;
+    return ksfTkErrOk;
 }
 
 // ========================= Raw Register Access ==============================
 
-int32_t sfDevINA228::getShuntVoltageRaw(void)
+sfTkError_t sfDevINA228::getShuntVoltageRaw(int32_t &value)
 {
-    if (!_theBus)
-        return 0;
-
     uint32_t raw = 0;
-    if (_readRegister24(ksfINA2XXRegVShunt, raw) != ksfTkErrOk)
-        return 0;
+    sfTkError_t rc = readRegister24(kRegVShunt, raw);
+    if (rc != ksfTkErrOk)
+        return rc;
 
     // Data is in bits [23:4]; shift right by 4 to get the 20-bit value.
-    int32_t value = (int32_t)(raw >> 4);
+    int32_t result = (int32_t)(raw >> 4);
 
     // Sign-extend from 20 bits.
-    if (value & (1L << 19))
-        value |= ~((1L << 20) - 1);
+    if (result & (1L << 19))
+        result |= ~((1L << 20) - 1);
 
-    return value;
+    value = result;
+    return ksfTkErrOk;
 }
 
-uint32_t sfDevINA228::getBusVoltageRaw(void)
+sfTkError_t sfDevINA228::getBusVoltageRaw(uint32_t &value)
 {
-    if (!_theBus)
-        return 0;
-
     uint32_t raw = 0;
-    if (_readRegister24(ksfINA2XXRegVBus, raw) != ksfTkErrOk)
-        return 0;
+    sfTkError_t rc = readRegister24(kRegVBus, raw);
+    if (rc != ksfTkErrOk)
+        return rc;
 
     // Data is in bits [23:4]; shift right by 4. Always positive.
-    return raw >> 4;
+    value = raw >> 4;
+    return ksfTkErrOk;
 }
 
-int32_t sfDevINA228::getCurrentRaw(void)
+sfTkError_t sfDevINA228::getCurrentRaw(int32_t &value)
 {
-    if (!_theBus)
-        return 0;
-
     uint32_t raw = 0;
-    if (_readRegister24(ksfINA2XXRegCurrent, raw) != ksfTkErrOk)
-        return 0;
+    sfTkError_t rc = readRegister24(kRegCurrent, raw);
+    if (rc != ksfTkErrOk)
+        return rc;
 
     // Data is in bits [23:4]; shift right by 4 to get the 20-bit value.
-    int32_t value = (int32_t)(raw >> 4);
+    int32_t result = (int32_t)(raw >> 4);
 
     // Sign-extend from 20 bits.
-    if (value & (1L << 19))
-        value |= ~((1L << 20) - 1);
+    if (result & (1L << 19))
+        result |= ~((1L << 20) - 1);
 
-    return value;
+    value = result;
+    return ksfTkErrOk;
 }
 
-uint32_t sfDevINA228::getPowerRaw(void)
+sfTkError_t sfDevINA228::getPowerRaw(uint32_t &value)
 {
-    if (!_theBus)
-        return 0;
-
-    uint32_t raw = 0;
-    if (_readRegister24(ksfINA2XXRegPower, raw) != ksfTkErrOk)
-        return 0;
-
     // All 24 bits are data (unsigned).
-    return raw;
+    return readRegister24(kRegPower, value);
 }

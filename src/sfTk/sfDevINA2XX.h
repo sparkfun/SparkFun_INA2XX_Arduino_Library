@@ -25,6 +25,10 @@
  *
  * Both devices use 8-bit register addresses and big-endian byte order over I2C.
  *
+ * Most methods return a SparkFun Toolkit error code (::ksfTkErrOk on success, a negative value on
+ * error); values read from the device are returned through reference (output) parameters. Callers
+ * that do not care about error handling can simply ignore the returned code.
+ *
  * @author SparkFun Electronics
  * @date 2025
  * @copyright Copyright (c) 2025, SparkFun Electronics Inc. This project is released under the MIT License.
@@ -43,147 +47,126 @@
 #include <sfTk/sfTkII2C.h>
 
 ///////////////////////////////////////////////////////////////////////////////
-// I2C Addressing
-///////////////////////////////////////////////////////////////////////////////
-/// Default 7-bit I2C address for the SparkFun Qwiic Power Monitor board.
-/// A0 = VS, A1 = GND gives 0x45. Both INA228 and INA237 support 0x40-0x4F.
-const uint8_t ksfINA2XXDefaultAddr = 0x45;
-
-///////////////////////////////////////////////////////////////////////////////
-// Register Addresses (shared between INA228 and INA237)
-///////////////////////////////////////////////////////////////////////////////
-const uint8_t ksfINA2XXRegConfig = 0x00;          ///< Configuration register (16-bit, R/W)
-const uint8_t ksfINA2XXRegAdcConfig = 0x01;       ///< ADC Configuration register (16-bit, R/W)
-const uint8_t ksfINA2XXRegShuntCal = 0x02;        ///< Shunt Calibration register (16-bit, R/W)
-const uint8_t ksfINA2XXRegShuntTempCo = 0x03;     ///< Shunt Temperature Coefficient (16-bit, R/W)
-const uint8_t ksfINA2XXRegVShunt = 0x04;          ///< Shunt Voltage Measurement (24-bit INA228 / 16-bit INA237, R)
-const uint8_t ksfINA2XXRegVBus = 0x05;            ///< Bus Voltage Measurement (24-bit INA228 / 16-bit INA237, R)
-const uint8_t ksfINA2XXRegDieTemp = 0x06;         ///< Die Temperature Measurement (16-bit, R)
-const uint8_t ksfINA2XXRegCurrent = 0x07;         ///< Current Result (24-bit INA228 / 16-bit INA237, R)
-const uint8_t ksfINA2XXRegPower = 0x08;           ///< Power Result (24-bit, R)
-const uint8_t ksfINA2XXRegEnergy = 0x09;          ///< Energy Result (40-bit, R) -- INA228 only
-const uint8_t ksfINA2XXRegCharge = 0x0A;          ///< Charge Result (40-bit, R) -- INA228 only
-const uint8_t ksfINA2XXRegDiagAlrt = 0x0B;        ///< Diagnostic Flags and Alert (16-bit, R/W)
-const uint8_t ksfINA2XXRegSOVL = 0x0C;            ///< Shunt Overvoltage Threshold (16-bit, R/W)
-const uint8_t ksfINA2XXRegSUVL = 0x0D;            ///< Shunt Undervoltage Threshold (16-bit, R/W)
-const uint8_t ksfINA2XXRegBOVL = 0x0E;            ///< Bus Overvoltage Threshold (16-bit, R/W)
-const uint8_t ksfINA2XXRegBUVL = 0x0F;            ///< Bus Undervoltage Threshold (16-bit, R/W)
-const uint8_t ksfINA2XXRegTempLimit = 0x10;       ///< Temperature Over-Limit Threshold (16-bit, R/W)
-const uint8_t ksfINA2XXRegPowerLimit = 0x11;      ///< Power Over-Limit Threshold (16-bit, R/W)
-const uint8_t ksfINA2XXRegManufacturerID = 0x3E;  ///< Manufacturer ID (16-bit, R) -- reads 0x5449 ("TI")
-const uint8_t ksfINA2XXRegDeviceID = 0x3F;        ///< Device ID (16-bit, R)
-
-///////////////////////////////////////////////////////////////////////////////
-// CONFIG Register (0x00) Bit Definitions
-///////////////////////////////////////////////////////////////////////////////
-const uint16_t ksfINA2XXConfigRst = (1U << 15);          ///< System reset (self-clearing)
-const uint16_t ksfINA2XXConfigRstAcc = (1U << 14);       ///< Reset energy/charge accumulators (INA228)
-const uint16_t ksfINA2XXConfigConvDlyMask = 0x3FC0;      ///< CONVDLY field mask, bits [13:6]
-const uint8_t ksfINA2XXConfigConvDlyShift = 6;            ///< CONVDLY field shift
-const uint16_t ksfINA2XXConfigTempComp = (1U << 5);      ///< Shunt temperature compensation enable
-const uint16_t ksfINA2XXConfigAdcRange = (1U << 4);      ///< ADC range: 0 = +/-163.84mV, 1 = +/-40.96mV
-
-///////////////////////////////////////////////////////////////////////////////
-// ADC_CONFIG Register (0x01) Bit Definitions
-///////////////////////////////////////////////////////////////////////////////
-const uint16_t ksfINA2XXAdcConfigModeMask = 0xF000;      ///< MODE field mask, bits [15:12]
-const uint8_t ksfINA2XXAdcConfigModeShift = 12;           ///< MODE field shift
-const uint16_t ksfINA2XXAdcConfigVBusCTMask = 0x0E00;    ///< VBUSCT field mask, bits [11:9]
-const uint8_t ksfINA2XXAdcConfigVBusCTShift = 9;          ///< VBUSCT field shift
-const uint16_t ksfINA2XXAdcConfigVShCTMask = 0x01C0;     ///< VSHCT field mask, bits [8:6]
-const uint8_t ksfINA2XXAdcConfigVShCTShift = 6;           ///< VSHCT field shift
-const uint16_t ksfINA2XXAdcConfigVTCTMask = 0x0038;      ///< VTCT field mask, bits [5:3]
-const uint8_t ksfINA2XXAdcConfigVTCTShift = 3;            ///< VTCT field shift
-const uint16_t ksfINA2XXAdcConfigAvgMask = 0x0007;       ///< AVG field mask, bits [2:0]
-
-///////////////////////////////////////////////////////////////////////////////
-// DIAG_ALRT Register (0x0B) Bit Definitions
-///////////////////////////////////////////////////////////////////////////////
-const uint16_t ksfINA2XXDiagAlatch = (1U << 15);         ///< Alert latch enable
-const uint16_t ksfINA2XXDiagCnvr = (1U << 14);           ///< Conversion ready flag on ALERT pin
-const uint16_t ksfINA2XXDiagSlowAlert = (1U << 13);      ///< Alert on averaged value
-const uint16_t ksfINA2XXDiagApol = (1U << 12);           ///< Alert polarity (0=active-low, 1=active-high)
-const uint16_t ksfINA2XXDiagEnergyOF = (1U << 11);       ///< Energy register overflow (INA228 only)
-const uint16_t ksfINA2XXDiagChargeOF = (1U << 10);       ///< Charge register overflow (INA228 only)
-const uint16_t ksfINA2XXDiagMathOF = (1U << 9);          ///< Math overflow
-const uint16_t ksfINA2XXDiagTmpOL = (1U << 7);           ///< Temperature over-limit
-const uint16_t ksfINA2XXDiagShntOL = (1U << 6);          ///< Shunt overvoltage
-const uint16_t ksfINA2XXDiagShntUL = (1U << 5);          ///< Shunt undervoltage
-const uint16_t ksfINA2XXDiagBusOL = (1U << 4);           ///< Bus overvoltage
-const uint16_t ksfINA2XXDiagBusUL = (1U << 3);           ///< Bus undervoltage
-const uint16_t ksfINA2XXDiagPOL = (1U << 2);             ///< Power over-limit
-const uint16_t ksfINA2XXDiagCnvrf = (1U << 1);           ///< Conversion ready flag
-const uint16_t ksfINA2XXDiagMemStat = (1U << 0);         ///< Memory checksum (1 = OK)
-
-///////////////////////////////////////////////////////////////////////////////
-// SHUNT_TEMPCO Register (0x03) Mask
-///////////////////////////////////////////////////////////////////////////////
-const uint16_t ksfINA2XXShuntTempCoMask = 0x3FFF;        ///< TEMPCO field mask, bits [13:0]
-
-///////////////////////////////////////////////////////////////////////////////
-// Device ID Constants
-///////////////////////////////////////////////////////////////////////////////
-const uint16_t ksfINA228DeviceIDValue = 0x2280;          ///< INA228 device ID (upper 12 bits)
-const uint16_t ksfINA237DeviceIDValue = 0x2370;          ///< INA237 device ID (upper 12 bits)
-const uint16_t ksfINA2XXDeviceIDMask = 0xFFF0;           ///< Mask for device ID (ignore revision)
-const uint16_t ksfINA2XXManufacturerIDValue = 0x5449;    ///< "TI" in ASCII
-
-///////////////////////////////////////////////////////////////////////////////
 // ADC Operating Mode Enumeration
 ///////////////////////////////////////////////////////////////////////////////
-/// @brief ADC operating mode settings for the MODE field in ADC_CONFIG.
-/// Modes 0x0 and 0x8 are both shutdown. Modes 0x1-0x7 are triggered (single-shot).
-/// Modes 0x9-0xF are continuous.
-enum sfe_ina2xx_mode_t : uint8_t
+/// @brief ADC operating mode settings for the MODE field in ADC_CONFIG (bits [15:12]).
+/// @details Modes 0x0 and 0x8 are both shutdown. Modes 0x1-0x7 are triggered (single-shot).
+/// Modes 0x9-0xF are continuous. A typedef is provided so the type can be used without the
+/// @c enum keyword in environments where that matters.
+typedef enum sfe_ina2xx_mode_t : uint8_t
 {
-    INA2XX_MODE_SHUTDOWN = 0x0,                     ///< Shutdown
-    INA2XX_MODE_TRIG_BUS = 0x1,                     ///< Triggered bus voltage, single shot
-    INA2XX_MODE_TRIG_SHUNT = 0x2,                   ///< Triggered shunt voltage, single shot
-    INA2XX_MODE_TRIG_BUS_SHUNT = 0x3,               ///< Triggered bus + shunt, single shot
-    INA2XX_MODE_TRIG_TEMP = 0x4,                    ///< Triggered temperature, single shot
-    INA2XX_MODE_TRIG_TEMP_BUS = 0x5,                ///< Triggered temp + bus, single shot
-    INA2XX_MODE_TRIG_TEMP_SHUNT = 0x6,              ///< Triggered temp + shunt, single shot
-    INA2XX_MODE_TRIG_ALL = 0x7,                     ///< Triggered bus + shunt + temp, single shot
-    INA2XX_MODE_SHUTDOWN2 = 0x8,                    ///< Shutdown (alternate)
-    INA2XX_MODE_CONT_BUS = 0x9,                     ///< Continuous bus voltage only
-    INA2XX_MODE_CONT_SHUNT = 0xA,                   ///< Continuous shunt voltage only
-    INA2XX_MODE_CONT_BUS_SHUNT = 0xB,               ///< Continuous bus + shunt
-    INA2XX_MODE_CONT_TEMP = 0xC,                    ///< Continuous temperature only
-    INA2XX_MODE_CONT_TEMP_BUS = 0xD,                ///< Continuous temp + bus
-    INA2XX_MODE_CONT_TEMP_SHUNT = 0xE,              ///< Continuous temp + shunt
-    INA2XX_MODE_CONT_ALL = 0xF                      ///< Continuous bus + shunt + temp (default)
-};
+    INA2XX_MODE_SHUTDOWN = 0x0,       ///< Shutdown
+    INA2XX_MODE_TRIG_BUS = 0x1,       ///< Triggered bus voltage, single shot
+    INA2XX_MODE_TRIG_SHUNT = 0x2,     ///< Triggered shunt voltage, single shot
+    INA2XX_MODE_TRIG_BUS_SHUNT = 0x3, ///< Triggered bus + shunt, single shot
+    INA2XX_MODE_TRIG_TEMP = 0x4,      ///< Triggered temperature, single shot
+    INA2XX_MODE_TRIG_TEMP_BUS = 0x5,  ///< Triggered temp + bus, single shot
+    INA2XX_MODE_TRIG_TEMP_SHUNT = 0x6, ///< Triggered temp + shunt, single shot
+    INA2XX_MODE_TRIG_ALL = 0x7,       ///< Triggered bus + shunt + temp, single shot
+    INA2XX_MODE_SHUTDOWN2 = 0x8,      ///< Shutdown (alternate)
+    INA2XX_MODE_CONT_BUS = 0x9,       ///< Continuous bus voltage only
+    INA2XX_MODE_CONT_SHUNT = 0xA,     ///< Continuous shunt voltage only
+    INA2XX_MODE_CONT_BUS_SHUNT = 0xB, ///< Continuous bus + shunt
+    INA2XX_MODE_CONT_TEMP = 0xC,      ///< Continuous temperature only
+    INA2XX_MODE_CONT_TEMP_BUS = 0xD,  ///< Continuous temp + bus
+    INA2XX_MODE_CONT_TEMP_SHUNT = 0xE, ///< Continuous temp + shunt
+    INA2XX_MODE_CONT_ALL = 0xF        ///< Continuous bus + shunt + temp (default)
+} sfe_ina2xx_mode_t;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Conversion Time Enumeration
 ///////////////////////////////////////////////////////////////////////////////
-/// @brief Conversion time settings shared by VBUSCT, VSHCT, and VTCT fields.
-enum sfe_ina2xx_conv_time_t : uint8_t
+/// @brief Conversion time settings shared by the VBUSCT, VSHCT, and VTCT fields.
+typedef enum sfe_ina2xx_conv_time_t : uint8_t
 {
-    INA2XX_CONV_50US = 0,    ///< 50 us
-    INA2XX_CONV_84US = 1,    ///< 84 us
-    INA2XX_CONV_150US = 2,   ///< 150 us
-    INA2XX_CONV_280US = 3,   ///< 280 us
-    INA2XX_CONV_540US = 4,   ///< 540 us
-    INA2XX_CONV_1052US = 5,  ///< 1052 us (default)
-    INA2XX_CONV_2074US = 6,  ///< 2074 us
-    INA2XX_CONV_4120US = 7   ///< 4120 us
-};
+    INA2XX_CONV_50US = 0,   ///< 50 us
+    INA2XX_CONV_84US = 1,   ///< 84 us
+    INA2XX_CONV_150US = 2,  ///< 150 us
+    INA2XX_CONV_280US = 3,  ///< 280 us
+    INA2XX_CONV_540US = 4,  ///< 540 us
+    INA2XX_CONV_1052US = 5, ///< 1052 us (default)
+    INA2XX_CONV_2074US = 6, ///< 2074 us
+    INA2XX_CONV_4120US = 7  ///< 4120 us
+} sfe_ina2xx_conv_time_t;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Averaging Count Enumeration
 ///////////////////////////////////////////////////////////////////////////////
-/// @brief ADC averaging count settings for the AVG field in ADC_CONFIG.
-enum sfe_ina2xx_avg_count_t : uint8_t
+/// @brief ADC averaging count settings for the AVG field in ADC_CONFIG (bits [2:0]).
+typedef enum sfe_ina2xx_avg_count_t : uint8_t
 {
-    INA2XX_AVG_1 = 0,      ///< 1 sample (no averaging, default)
-    INA2XX_AVG_4 = 1,      ///< 4 samples
-    INA2XX_AVG_16 = 2,     ///< 16 samples
-    INA2XX_AVG_64 = 3,     ///< 64 samples
-    INA2XX_AVG_128 = 4,    ///< 128 samples
-    INA2XX_AVG_256 = 5,    ///< 256 samples
-    INA2XX_AVG_512 = 6,    ///< 512 samples
-    INA2XX_AVG_1024 = 7    ///< 1024 samples
+    INA2XX_AVG_1 = 0,    ///< 1 sample (no averaging, default)
+    INA2XX_AVG_4 = 1,    ///< 4 samples
+    INA2XX_AVG_16 = 2,   ///< 16 samples
+    INA2XX_AVG_64 = 3,   ///< 64 samples
+    INA2XX_AVG_128 = 4,  ///< 128 samples
+    INA2XX_AVG_256 = 5,  ///< 256 samples
+    INA2XX_AVG_512 = 6,  ///< 512 samples
+    INA2XX_AVG_1024 = 7  ///< 1024 samples
+} sfe_ina2xx_avg_count_t;
+
+///////////////////////////////////////////////////////////////////////////////
+// CONFIG Register Bitfield (Address 0x00)
+///////////////////////////////////////////////////////////////////////////////
+/// @brief Bitfield union for the 16-bit CONFIG register (0x00).
+union sfe_ina2xx_config_reg_t
+{
+    struct
+    {
+        uint16_t : 4;          ///< Reserved [bits 3:0]
+        uint16_t adcRange : 1; ///< ADC range: 0 = +/-163.84mV, 1 = +/-40.96mV [bit 4]
+        uint16_t tempComp : 1; ///< Shunt temperature compensation enable [bit 5]
+        uint16_t convDly : 8;  ///< Initial conversion delay, 2ms steps [bits 13:6]
+        uint16_t rstAcc : 1;   ///< Reset ENERGY/CHARGE accumulators (INA228) [bit 14]
+        uint16_t rst : 1;      ///< System reset (self-clearing) [bit 15]
+    };
+    uint16_t word; ///< Raw register value for I2C read/write.
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// ADC_CONFIG Register Bitfield (Address 0x01)
+///////////////////////////////////////////////////////////////////////////////
+/// @brief Bitfield union for the 16-bit ADC_CONFIG register (0x01).
+union sfe_ina2xx_adc_config_reg_t
+{
+    struct
+    {
+        uint16_t avg : 3;    ///< ADC sample averaging count (see sfe_ina2xx_avg_count_t) [bits 2:0]
+        uint16_t vtct : 3;   ///< Temperature conversion time (see sfe_ina2xx_conv_time_t) [bits 5:3]
+        uint16_t vshct : 3;  ///< Shunt voltage conversion time [bits 8:6]
+        uint16_t vbusct : 3; ///< Bus voltage conversion time [bits 11:9]
+        uint16_t mode : 4;   ///< Operating mode (see sfe_ina2xx_mode_t) [bits 15:12]
+    };
+    uint16_t word; ///< Raw register value for I2C read/write.
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// DIAG_ALRT Register Bitfield (Address 0x0B)
+///////////////////////////////////////////////////////////////////////////////
+/// @brief Bitfield union for the 16-bit DIAG_ALRT diagnostic flags and alert register (0x0B).
+/// @details Reading this register clears latched alert flags when ALATCH = 1.
+union sfe_ina2xx_diag_alrt_reg_t
+{
+    struct
+    {
+        uint16_t memStat : 1;   ///< Memory checksum status (1 = OK) [bit 0]
+        uint16_t cnvrf : 1;     ///< Conversion ready flag [bit 1]
+        uint16_t pol : 1;       ///< Power over-limit [bit 2]
+        uint16_t busUL : 1;     ///< Bus undervoltage [bit 3]
+        uint16_t busOL : 1;     ///< Bus overvoltage [bit 4]
+        uint16_t shntUL : 1;    ///< Shunt undervoltage [bit 5]
+        uint16_t shntOL : 1;    ///< Shunt overvoltage [bit 6]
+        uint16_t tmpOL : 1;     ///< Temperature over-limit [bit 7]
+        uint16_t : 1;           ///< Reserved [bit 8]
+        uint16_t mathOF : 1;    ///< Math overflow [bit 9]
+        uint16_t chargeOF : 1;  ///< Charge register overflow (INA228 only) [bit 10]
+        uint16_t energyOF : 1;  ///< Energy register overflow (INA228 only) [bit 11]
+        uint16_t apol : 1;      ///< Alert polarity (0=active-low, 1=active-high) [bit 12]
+        uint16_t slowAlert : 1; ///< Alert on averaged value [bit 13]
+        uint16_t cnvr : 1;      ///< Conversion-ready flag on ALERT pin [bit 14]
+        uint16_t alatch : 1;    ///< Alert latch enable [bit 15]
+    };
+    uint16_t word; ///< Raw register value for I2C read/write.
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -197,6 +180,9 @@ enum sfe_ina2xx_avg_count_t : uint8_t
 /// CURRENT, POWER, ENERGY, CHARGE) are implemented in the derived sfDevINA228 and sfDevINA237
 /// classes because they differ in register width and scaling.
 ///
+/// Most methods return a SparkFun Toolkit error code (::ksfTkErrOk on success, a negative value
+/// on error); values read from the device are returned through reference (output) parameters.
+///
 /// This class does not depend on Arduino. The Arduino-specific wrappers (SfeINA228ArdI2C,
 /// SfeINA237ArdI2C) provide begin() and isConnected() methods.
 class sfDevINA2XX
@@ -208,9 +194,9 @@ class sfDevINA2XX
 
     /// @brief Initialize the device driver with the given bus.
     /// @details Sets the communication bus and configures byte order for big-endian.
-    /// @param theBus Pointer to the initialized bus object.
-    /// @return ksfTkErrOk on success, or an error code on failure.
-    bool begin(sfTkIBus *theBus = nullptr);
+    /// @param theBus Pointer to the initialized bus object. If null, a bus set by a prior call is used.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t begin(sfTkIBus *theBus = nullptr);
 
     /// @brief Set the communication bus pointer.
     /// @param theBus Bus to use for all register I/O.
@@ -219,309 +205,350 @@ class sfDevINA2XX
     // ========================= Identity & Reset =============================
 
     /// @brief Read the Manufacturer ID register (0x3E).
-    /// @return Manufacturer ID (0x5449 = "TI"), or 0 on error.
-    uint16_t getManufacturerID(void);
+    /// @param id Output reference that receives the manufacturer ID (0x5449 = "TI").
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getManufacturerID(uint16_t &id);
 
     /// @brief Read the Device ID register (0x3F).
-    /// @return Full 16-bit device ID (including revision nibble), or 0 on error.
-    uint16_t getDeviceID(void);
+    /// @param id Output reference that receives the full 16-bit device ID (including revision nibble).
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getDeviceID(uint16_t &id);
 
     /// @brief Perform a full system reset via the RST bit in CONFIG.
-    /// @return True on success, false on error.
-    bool reset(void);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t reset(void);
 
     /// @brief Reset the energy and charge accumulators (INA228 RSTACC bit).
-    /// @return True on success, false on error.
-    bool resetAccumulators(void);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t resetAccumulators(void);
 
     // ========================= CONFIG Register (0x00) =======================
 
     /// @brief Set the ADC full-scale shunt range.
     /// @param reducedRange False = +/-163.84mV (default), true = +/-40.96mV.
-    /// @return True on success, false on error.
-    bool setADCRange(bool reducedRange);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setADCRange(bool reducedRange);
 
     /// @brief Get the current ADC range setting.
-    /// @return True if reduced range (+/-40.96mV), false if default (+/-163.84mV).
-    bool getADCRange(void);
+    /// @param reducedRange Output reference set true if reduced range (+/-40.96mV), false if default.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getADCRange(bool &reducedRange);
 
     /// @brief Set the initial conversion delay in 2ms steps.
     /// @param delay2ms Delay value 0-255 (0 = 0ms, 255 = 510ms).
-    /// @return True on success, false on error.
-    bool setConversionDelay(uint8_t delay2ms);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setConversionDelay(uint8_t delay2ms);
 
     /// @brief Get the current conversion delay setting.
-    /// @return Delay value 0-255, or 0 on error.
-    uint8_t getConversionDelay(void);
+    /// @param delay2ms Output reference that receives the delay value 0-255.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getConversionDelay(uint8_t &delay2ms);
 
     /// @brief Enable or disable shunt temperature compensation.
     /// @param enable True to enable, false to disable.
-    /// @return True on success, false on error.
-    bool enableTempCompensation(bool enable);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t enableTempCompensation(bool enable);
 
     /// @brief Get the temperature compensation enable state.
-    /// @return True if enabled, false if disabled (or on error).
-    bool getTempCompensation(void);
+    /// @param enabled Output reference set true if enabled.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getTempCompensation(bool &enabled);
 
     // ====================== ADC_CONFIG Register (0x01) ======================
 
     /// @brief Set the ADC operating mode.
     /// @param mode Operating mode (see sfe_ina2xx_mode_t).
-    /// @return True on success, false on error.
-    bool setADCMode(sfe_ina2xx_mode_t mode);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setADCMode(sfe_ina2xx_mode_t mode);
 
     /// @brief Get the current ADC operating mode.
-    /// @return Operating mode, or INA2XX_MODE_CONT_ALL on error.
-    sfe_ina2xx_mode_t getADCMode(void);
+    /// @param mode Output reference that receives the operating mode.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getADCMode(sfe_ina2xx_mode_t &mode);
 
     /// @brief Set the bus voltage conversion time.
     /// @param time Conversion time setting (see sfe_ina2xx_conv_time_t).
-    /// @return True on success, false on error.
-    bool setBusVoltageConvTime(sfe_ina2xx_conv_time_t time);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setBusVoltageConvTime(sfe_ina2xx_conv_time_t time);
 
     /// @brief Get the bus voltage conversion time.
-    /// @return Conversion time setting.
-    sfe_ina2xx_conv_time_t getBusVoltageConvTime(void);
+    /// @param time Output reference that receives the conversion time setting.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getBusVoltageConvTime(sfe_ina2xx_conv_time_t &time);
 
     /// @brief Set the shunt voltage conversion time.
     /// @param time Conversion time setting (see sfe_ina2xx_conv_time_t).
-    /// @return True on success, false on error.
-    bool setShuntVoltageConvTime(sfe_ina2xx_conv_time_t time);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setShuntVoltageConvTime(sfe_ina2xx_conv_time_t time);
 
     /// @brief Get the shunt voltage conversion time.
-    /// @return Conversion time setting.
-    sfe_ina2xx_conv_time_t getShuntVoltageConvTime(void);
+    /// @param time Output reference that receives the conversion time setting.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getShuntVoltageConvTime(sfe_ina2xx_conv_time_t &time);
 
     /// @brief Set the temperature conversion time.
     /// @param time Conversion time setting (see sfe_ina2xx_conv_time_t).
-    /// @return True on success, false on error.
-    bool setTempConvTime(sfe_ina2xx_conv_time_t time);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setTempConvTime(sfe_ina2xx_conv_time_t time);
 
     /// @brief Get the temperature conversion time.
-    /// @return Conversion time setting.
-    sfe_ina2xx_conv_time_t getTempConvTime(void);
+    /// @param time Output reference that receives the conversion time setting.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getTempConvTime(sfe_ina2xx_conv_time_t &time);
 
     /// @brief Set the ADC averaging count.
     /// @param count Averaging count (see sfe_ina2xx_avg_count_t).
-    /// @return True on success, false on error.
-    bool setAveragingCount(sfe_ina2xx_avg_count_t count);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setAveragingCount(sfe_ina2xx_avg_count_t count);
 
     /// @brief Get the current ADC averaging count.
-    /// @return Averaging count setting.
-    sfe_ina2xx_avg_count_t getAveragingCount(void);
+    /// @param count Output reference that receives the averaging count setting.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getAveragingCount(sfe_ina2xx_avg_count_t &count);
 
     // ================== Calibration Registers (0x02-0x03) ===================
 
     /// @brief Write a raw value to the SHUNT_CAL register.
     /// @param calValue 15-bit calibration value (bit 15 is reserved).
-    /// @return True on success, false on error.
-    bool setShuntCal(uint16_t calValue);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setShuntCal(uint16_t calValue);
 
     /// @brief Read the current SHUNT_CAL register value.
-    /// @return Calibration value, or 0 on error.
-    uint16_t getShuntCal(void);
+    /// @param calValue Output reference that receives the calibration value.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getShuntCal(uint16_t &calValue);
 
     /// @brief Set the shunt temperature coefficient for temperature compensation.
     /// @param ppmPerDegC Temperature coefficient, 0-16383 ppm/deg-C.
-    /// @return True on success, false on error.
-    bool setShuntTempCoefficient(uint16_t ppmPerDegC);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setShuntTempCoefficient(uint16_t ppmPerDegC);
 
     /// @brief Get the shunt temperature coefficient.
-    /// @return Temperature coefficient in ppm/deg-C, or 0 on error.
-    uint16_t getShuntTempCoefficient(void);
+    /// @param ppmPerDegC Output reference that receives the temperature coefficient in ppm/deg-C.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getShuntTempCoefficient(uint16_t &ppmPerDegC);
 
     // ================== Diagnostics & Alert (0x0B) ==========================
 
     /// @brief Read the full DIAG_ALRT register.
     /// @details Reading this register clears latched alert flags when ALATCH = 1.
-    /// @return Raw 16-bit DIAG_ALRT value, or 0 on error.
-    uint16_t getDiagnosticFlags(void);
+    /// @param flags Output reference that receives the diagnostic flags bitfield.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getDiagnosticFlags(sfe_ina2xx_diag_alrt_reg_t &flags);
 
     /// @brief Enable or disable alert latching.
     /// @param latched True = latched mode, false = transparent mode.
-    /// @return True on success, false on error.
-    bool setAlertLatch(bool latched);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setAlertLatch(bool latched);
 
     /// @brief Get the alert latch setting.
-    /// @return True if latched, false if transparent.
-    bool getAlertLatch(void);
+    /// @param latched Output reference set true if latched, false if transparent.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getAlertLatch(bool &latched);
 
     /// @brief Enable conversion ready flag on the ALERT pin.
     /// @param enable True to assert ALERT on conversion complete.
-    /// @return True on success, false on error.
-    bool setConversionReadyAlert(bool enable);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setConversionReadyAlert(bool enable);
 
     /// @brief Get the conversion ready alert enable state.
-    /// @return True if enabled.
-    bool getConversionReadyAlert(void);
+    /// @param enabled Output reference set true if enabled.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getConversionReadyAlert(bool &enabled);
 
     /// @brief Enable alert comparison on averaged (vs. instantaneous) values.
     /// @param enable True = alert on averaged value, false = alert on ADC value.
-    /// @return True on success, false on error.
-    bool setSlowAlert(bool enable);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setSlowAlert(bool enable);
 
     /// @brief Get the slow alert enable state.
-    /// @return True if alert compares on averaged value.
-    bool getSlowAlert(void);
+    /// @param enabled Output reference set true if alert compares on averaged value.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getSlowAlert(bool &enabled);
 
     /// @brief Set the ALERT pin polarity.
     /// @param activeHigh True = active-high, false = active-low (default, open-drain).
-    /// @return True on success, false on error.
-    bool setAlertPolarity(bool activeHigh);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setAlertPolarity(bool activeHigh);
 
     /// @brief Get the ALERT pin polarity setting.
-    /// @return True if active-high, false if active-low.
-    bool getAlertPolarity(void);
+    /// @param activeHigh Output reference set true if active-high, false if active-low.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getAlertPolarity(bool &activeHigh);
 
     /// @brief Check if the energy register has overflowed (INA228 only).
-    /// @return True if overflow detected.
-    bool isEnergyOverflow(void);
+    /// @param overflow Output reference set true if overflow detected.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t isEnergyOverflow(bool &overflow);
 
     /// @brief Check if the charge register has overflowed (INA228 only).
-    /// @return True if overflow detected.
-    bool isChargeOverflow(void);
+    /// @param overflow Output reference set true if overflow detected.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t isChargeOverflow(bool &overflow);
 
     /// @brief Check if a math overflow has occurred in current/power calculations.
-    /// @return True if overflow detected.
-    bool isMathOverflow(void);
+    /// @param overflow Output reference set true if overflow detected.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t isMathOverflow(bool &overflow);
 
     /// @brief Check if the temperature over-limit flag is set.
-    /// @return True if temperature exceeds TEMP_LIMIT threshold.
-    bool isTempOverLimit(void);
+    /// @param overLimit Output reference set true if temperature exceeds TEMP_LIMIT threshold.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t isTempOverLimit(bool &overLimit);
 
     /// @brief Check if the shunt overvoltage flag is set.
-    /// @return True if shunt voltage exceeds SOVL threshold.
-    bool isShuntOverVoltage(void);
+    /// @param overVoltage Output reference set true if shunt voltage exceeds SOVL threshold.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t isShuntOverVoltage(bool &overVoltage);
 
     /// @brief Check if the shunt undervoltage flag is set.
-    /// @return True if shunt voltage is below SUVL threshold.
-    bool isShuntUnderVoltage(void);
+    /// @param underVoltage Output reference set true if shunt voltage is below SUVL threshold.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t isShuntUnderVoltage(bool &underVoltage);
 
     /// @brief Check if the bus overvoltage flag is set.
-    /// @return True if bus voltage exceeds BOVL threshold.
-    bool isBusOverVoltage(void);
+    /// @param overVoltage Output reference set true if bus voltage exceeds BOVL threshold.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t isBusOverVoltage(bool &overVoltage);
 
     /// @brief Check if the bus undervoltage flag is set.
-    /// @return True if bus voltage is below BUVL threshold.
-    bool isBusUnderVoltage(void);
+    /// @param underVoltage Output reference set true if bus voltage is below BUVL threshold.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t isBusUnderVoltage(bool &underVoltage);
 
     /// @brief Check if the power over-limit flag is set.
-    /// @return True if power exceeds PWR_LIMIT threshold.
-    bool isPowerOverLimit(void);
+    /// @param overLimit Output reference set true if power exceeds PWR_LIMIT threshold.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t isPowerOverLimit(bool &overLimit);
 
     /// @brief Check if a conversion has completed.
-    /// @return True if conversion ready.
-    bool isConversionReady(void);
+    /// @param ready Output reference set true if conversion ready.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t isConversionReady(bool &ready);
 
     /// @brief Check the memory checksum status.
-    /// @return True if internal memory checksum is valid.
-    bool isMemoryValid(void);
+    /// @param valid Output reference set true if the internal memory checksum is valid.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t isMemoryValid(bool &valid);
 
     // ==================== Threshold Registers (0x0C-0x11) ===================
 
     /// @brief Set the shunt overvoltage threshold.
     /// @param threshold Two's complement value. LSB = 5uV (ADCRANGE=0) or 1.25uV (ADCRANGE=1).
-    /// @return True on success, false on error.
-    bool setShuntOverVoltageThreshold(int16_t threshold);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setShuntOverVoltageThreshold(int16_t threshold);
 
     /// @brief Get the shunt overvoltage threshold.
-    /// @return Threshold value, or 0 on error.
-    int16_t getShuntOverVoltageThreshold(void);
+    /// @param threshold Output reference that receives the threshold value.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getShuntOverVoltageThreshold(int16_t &threshold);
 
     /// @brief Set the shunt undervoltage threshold.
     /// @param threshold Two's complement value. Same LSB as shunt overvoltage.
-    /// @return True on success, false on error.
-    bool setShuntUnderVoltageThreshold(int16_t threshold);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setShuntUnderVoltageThreshold(int16_t threshold);
 
     /// @brief Get the shunt undervoltage threshold.
-    /// @return Threshold value, or 0 on error.
-    int16_t getShuntUnderVoltageThreshold(void);
+    /// @param threshold Output reference that receives the threshold value.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getShuntUnderVoltageThreshold(int16_t &threshold);
 
     /// @brief Set the bus overvoltage threshold.
     /// @param threshold Unsigned 15-bit value. LSB = 3.125mV.
-    /// @return True on success, false on error.
-    bool setBusOverVoltageThreshold(uint16_t threshold);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setBusOverVoltageThreshold(uint16_t threshold);
 
     /// @brief Get the bus overvoltage threshold.
-    /// @return Threshold value, or 0 on error.
-    uint16_t getBusOverVoltageThreshold(void);
+    /// @param threshold Output reference that receives the threshold value.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getBusOverVoltageThreshold(uint16_t &threshold);
 
     /// @brief Set the bus undervoltage threshold.
     /// @param threshold Unsigned 15-bit value. LSB = 3.125mV.
-    /// @return True on success, false on error.
-    bool setBusUnderVoltageThreshold(uint16_t threshold);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setBusUnderVoltageThreshold(uint16_t threshold);
 
     /// @brief Get the bus undervoltage threshold.
-    /// @return Threshold value, or 0 on error.
-    uint16_t getBusUnderVoltageThreshold(void);
+    /// @param threshold Output reference that receives the threshold value.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getBusUnderVoltageThreshold(uint16_t &threshold);
 
     /// @brief Set the temperature over-limit threshold.
     /// @param threshold Two's complement value. LSB = 7.8125 m-deg-C.
-    /// @return True on success, false on error.
-    bool setTempLimitThreshold(int16_t threshold);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setTempLimitThreshold(int16_t threshold);
 
     /// @brief Get the temperature over-limit threshold.
-    /// @return Threshold value, or 0 on error.
-    int16_t getTempLimitThreshold(void);
+    /// @param threshold Output reference that receives the threshold value.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getTempLimitThreshold(int16_t &threshold);
 
     /// @brief Set the power over-limit threshold.
     /// @param threshold Unsigned value. LSB = 256 x Power LSB.
-    /// @return True on success, false on error.
-    bool setPowerLimitThreshold(uint16_t threshold);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t setPowerLimitThreshold(uint16_t threshold);
 
     /// @brief Get the power over-limit threshold.
-    /// @return Threshold value, or 0 on error.
-    uint16_t getPowerLimitThreshold(void);
+    /// @param threshold Output reference that receives the threshold value.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getPowerLimitThreshold(uint16_t &threshold);
 
   protected:
-    sfTkIBus *_theBus;    ///< Pointer to the communication bus device.
-    float _currentLSB;    ///< Current measurement LSB in Amps, set during calibration.
-    bool _adcRange;       ///< Cached ADC range: false = +/-163.84mV, true = +/-40.96mV.
-    float _shuntRes;      ///< Shunt resistance in Ohms, stored during calibration.
-
-    /// @brief Helper to read a DIAG_ALRT bit without clearing latched flags.
-    /// @details Reads the full register and checks the specified bit.
-    /// @param bitMask The bit to check.
-    /// @return True if the bit is set.
-    bool _getDiagBit(uint16_t bitMask);
-
-    /// @brief Helper to set or clear a single bit in a 16-bit register.
-    /// @param reg Register address.
-    /// @param bitMask The bit to modify.
-    /// @param set True to set the bit, false to clear it.
-    /// @return True on success, false on error.
-    bool _setRegisterBit(uint8_t reg, uint16_t bitMask, bool set);
-
-    /// @brief Helper to get a single bit from a 16-bit register.
-    /// @param reg Register address.
-    /// @param bitMask The bit to check.
-    /// @return True if the bit is set, false otherwise.
-    bool _getRegisterBit(uint8_t reg, uint16_t bitMask);
-
-    /// @brief Helper to set a multi-bit field in a 16-bit register.
-    /// @param reg Register address.
-    /// @param mask Field mask.
-    /// @param shift Field bit shift.
-    /// @param value Value to set in the field.
-    /// @return True on success, false on error.
-    bool _setRegisterField(uint8_t reg, uint16_t mask, uint8_t shift, uint8_t value);
-
-    /// @brief Helper to get a multi-bit field from a 16-bit register.
-    /// @param reg Register address.
-    /// @param mask Field mask.
-    /// @param shift Field bit shift.
-    /// @return Field value, or 0 on error.
-    uint8_t _getRegisterField(uint8_t reg, uint16_t mask, uint8_t shift);
+    sfTkIBus *_theBus; ///< Pointer to the communication bus device.
+    float _currentLSB; ///< Current measurement LSB in Amps, set during calibration.
+    bool _adcRange;    ///< Cached ADC range: false = +/-163.84mV, true = +/-40.96mV.
+    float _shuntRes;   ///< Shunt resistance in Ohms, stored during calibration.
 
     /// @brief Read 3 bytes (24-bit) from a register into a uint32_t.
     /// @param reg Register address.
     /// @param value Output value (MSB-first assembly).
-    /// @return ksfTkErrOk on success.
-    sfTkError_t _readRegister24(uint8_t reg, uint32_t &value);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t readRegister24(uint8_t reg, uint32_t &value);
 
     /// @brief Read 5 bytes (40-bit) from a register into a uint64_t.
     /// @param reg Register address.
     /// @param value Output value (MSB-first assembly).
-    /// @return ksfTkErrOk on success.
-    sfTkError_t _readRegister40(uint8_t reg, uint64_t &value);
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t readRegister40(uint8_t reg, uint64_t &value);
+
+    ///////////////////////////////////////////////////////////////////////////
+    // I2C Addressing
+    ///////////////////////////////////////////////////////////////////////////
+    /// Default 7-bit I2C address for the SparkFun Qwiic Power Monitor board.
+    /// A0 = GND, A1 = GND gives 0x40. Both INA228 and INA237 support 0x40-0x4F.
+    static const uint8_t kI2CAddress = 0x40;
+
+    // Register Addresses (shared between INA228 and INA237)
+    static const uint8_t kRegConfig = 0x00;         ///< Configuration register (16-bit, R/W)
+    static const uint8_t kRegAdcConfig = 0x01;      ///< ADC Configuration register (16-bit, R/W)
+    static const uint8_t kRegShuntCal = 0x02;       ///< Shunt Calibration register (16-bit, R/W)
+    static const uint8_t kRegShuntTempCo = 0x03;    ///< Shunt Temperature Coefficient (16-bit, R/W)
+    static const uint8_t kRegVShunt = 0x04;         ///< Shunt Voltage Measurement (24/16-bit, R)
+    static const uint8_t kRegVBus = 0x05;           ///< Bus Voltage Measurement (24/16-bit, R)
+    static const uint8_t kRegDieTemp = 0x06;        ///< Die Temperature Measurement (16-bit, R)
+    static const uint8_t kRegCurrent = 0x07;        ///< Current Result (24/16-bit, R)
+    static const uint8_t kRegPower = 0x08;          ///< Power Result (24-bit, R)
+    static const uint8_t kRegEnergy = 0x09;         ///< Energy Result (40-bit, R) -- INA228 only
+    static const uint8_t kRegCharge = 0x0A;         ///< Charge Result (40-bit, R) -- INA228 only
+    static const uint8_t kRegDiagAlrt = 0x0B;       ///< Diagnostic Flags and Alert (16-bit, R/W)
+    static const uint8_t kRegSOVL = 0x0C;           ///< Shunt Overvoltage Threshold (16-bit, R/W)
+    static const uint8_t kRegSUVL = 0x0D;           ///< Shunt Undervoltage Threshold (16-bit, R/W)
+    static const uint8_t kRegBOVL = 0x0E;           ///< Bus Overvoltage Threshold (16-bit, R/W)
+    static const uint8_t kRegBUVL = 0x0F;           ///< Bus Undervoltage Threshold (16-bit, R/W)
+    static const uint8_t kRegTempLimit = 0x10;      ///< Temperature Over-Limit Threshold (16-bit, R/W)
+    static const uint8_t kRegPowerLimit = 0x11;     ///< Power Over-Limit Threshold (16-bit, R/W)
+    static const uint8_t kRegManufacturerID = 0x3E; ///< Manufacturer ID (16-bit, R) -- reads 0x5449 ("TI")
+    static const uint8_t kRegDeviceID = 0x3F;       ///< Device ID (16-bit, R)
+
+    // Field masks
+    static const uint16_t kShuntCalMask = 0x7FFF;     ///< SHUNT_CAL valid bits [14:0] (bit 15 reserved)
+    static const uint16_t kBusThresholdMask = 0x7FFF; ///< BOVL/BUVL valid bits [14:0] (bit 15 reserved)
+    static const uint16_t kShuntTempCoMask = 0x3FFF;  ///< TEMPCO field mask, bits [13:0]
+
+    // Device ID Constants
+    static const uint16_t kINA228DeviceIDValue = 0x2280;  ///< INA228 device ID (upper 12 bits)
+    static const uint16_t kINA237DeviceIDValue = 0x2370;  ///< INA237 device ID (upper 12 bits)
+    static const uint16_t kINA238DeviceIDValue = 0x2380;  ///< INA238 device ID (register-compatible with INA237)
+    static const uint16_t kDeviceIDMask = 0xFFF0;         ///< Mask for device ID (ignore revision)
+    static const uint16_t kManufacturerIDValue = 0x5449;  ///< "TI" in ASCII
 };

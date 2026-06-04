@@ -1,9 +1,13 @@
 /*
   Example 01 - Basic Readings
 
-  This example shows how to set up the INA228 power monitor with the SparkFun
-  Qwiic Power Monitor board and read current, bus voltage, power, and die
-  temperature.
+  This example shows how to set up the INA228 or INA237 power monitor with the
+  SparkFun Qwiic Power Monitor board and read current, bus voltage, power, and
+  die temperature.
+
+  The sketch auto-detects which device is connected by checking the Device ID
+  register. Both the INA228 and INA237 share the same default I2C address (0x40),
+  so you can use either board without changing code.
 
   The board features a 15 mOhm shunt resistor and a three-pin screw terminal
   for +/- Vin and VBUS, allowing both current and power measurements.
@@ -17,7 +21,7 @@
     Please see LICENSE.md for further details.
 
   Hardware Connections:
-  IoT RedBoard --> INA228
+  IoT RedBoard --> INA228 or INA237
   QWIIC --> QWIIC
 
   Connect your load across the screw terminals:
@@ -31,28 +35,49 @@
 
 #include <SparkFun_INA2XX.h>
 
-SfeINA228ArdI2C myPowerMonitor;
+// Create both device objects — only one will be used.
+SfeINA228ArdI2C myINA228;
+SfeINA237ArdI2C myINA237;
+
+// Pointer to the base class so we can call shared methods on whichever is found.
+sfDevINA2XX *myPowerMonitor = nullptr;
+
+// Track which device was detected.
+bool isINA228 = false;
 
 void setup()
 {
     Serial.begin(115200);
     delay(1000);
-    Serial.println("INA228 Example 01 - Basic Readings");
+    Serial.println("INA2XX Example 01 - Basic Readings (Auto-Detect)");
 
     Wire.begin();
 
-    // Initialize the INA228 at default I2C address (0x45).
-    if (!myPowerMonitor.begin())
+    // Try INA228 first (checks Device ID for 0x228x).
+    if (myINA228.begin())
     {
-        Serial.println("INA228 not found. Please check wiring. Freezing...");
+        Serial.println("INA228 detected!");
+        myPowerMonitor = &myINA228;
+        isINA228 = true;
+    }
+    // If that fails, try INA237 (checks Device ID for 0x237x).
+    else if (myINA237.begin())
+    {
+        Serial.println("INA237 detected!");
+        myPowerMonitor = &myINA237;
+        isINA228 = false;
+    }
+    else
+    {
+        Serial.println("No INA228 or INA237 found. Please check wiring. Freezing...");
         while (1)
             delay(1000);
     }
 
-    Serial.println("INA228 connected!");
-
     // Calibrate for the 15 mOhm shunt resistor on the board, 10A max current.
-    if (!myPowerMonitor.calibrate(0.015, 10.0))
+    // Both devices use the same calibrate() interface, which returns a Toolkit error code.
+    sfTkError_t rc = isINA228 ? myINA228.calibrate(0.015, 10.0) : myINA237.calibrate(0.015, 10.0);
+    if (rc != ksfTkErrOk)
     {
         Serial.println("Calibration failed. Freezing...");
         while (1)
@@ -65,10 +90,38 @@ void setup()
 
 void loop()
 {
-    float busVoltage = myPowerMonitor.getBusVoltage_V();
-    float current = myPowerMonitor.getCurrent_A();
-    float power = myPowerMonitor.getPower_W();
-    float temperature = myPowerMonitor.getDieTemp_C();
+    float busVoltage = 0.0f, current = 0.0f, power = 0.0f, temperature = 0.0f;
+    sfTkError_t rc;
+
+    // Every getter returns a Toolkit error code; the reading comes back through the reference
+    // argument. If any read fails, skip this cycle rather than print stale data.
+    if (isINA228)
+    {
+        rc = myINA228.getBusVoltage_V(busVoltage);
+        if (rc == ksfTkErrOk)
+            rc = myINA228.getCurrent_A(current);
+        if (rc == ksfTkErrOk)
+            rc = myINA228.getPower_W(power);
+        if (rc == ksfTkErrOk)
+            rc = myINA228.getDieTemp_C(temperature);
+    }
+    else
+    {
+        rc = myINA237.getBusVoltage_V(busVoltage);
+        if (rc == ksfTkErrOk)
+            rc = myINA237.getCurrent_A(current);
+        if (rc == ksfTkErrOk)
+            rc = myINA237.getPower_W(power);
+        if (rc == ksfTkErrOk)
+            rc = myINA237.getDieTemp_C(temperature);
+    }
+
+    if (rc != ksfTkErrOk)
+    {
+        Serial.println("Read error. Retrying...");
+        delay(500);
+        return;
+    }
 
     Serial.print("Bus Voltage: ");
     Serial.print(busVoltage, 4);

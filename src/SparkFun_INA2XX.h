@@ -23,9 +23,12 @@
  * }
  *
  * void loop() {
- *     Serial.print("Current: ");
- *     Serial.print(powerMonitor.getCurrent_A(), 4);
- *     Serial.println(" A");
+ *     float current = 0.0f;
+ *     if (powerMonitor.getCurrent_A(current) == ksfTkErrOk) {
+ *         Serial.print("Current: ");
+ *         Serial.print(current, 4);
+ *         Serial.println(" A");
+ *     }
  *     delay(500);
  * }
  * @endcode
@@ -78,13 +81,13 @@ class SfeINA228ArdI2C : public sfDevINA228
      * 2. Calls the base class begin() to set the bus and configure byte order
      * 3. Verifies the device is connected via ping and Device ID check
      *
-     * @param address 7-bit I2C address (default: 0x45)
+     * @param address 7-bit I2C address (default: 0x40)
      * @param wirePort TwoWire instance for I2C communication (default: Wire)
      *
      * @return true If initialization is successful
      * @return false If any step fails
      */
-    bool begin(const uint8_t &address = ksfINA2XXDefaultAddr, TwoWire &wirePort = Wire)
+    bool begin(uint8_t address = kI2CAddress, TwoWire &wirePort = Wire)
     {
         if (_theI2CBus.init(wirePort, address) != ksfTkErrOk)
             return false;
@@ -110,8 +113,11 @@ class SfeINA228ArdI2C : public sfDevINA228
         if (_theI2CBus.ping() != ksfTkErrOk)
             return false;
 
-        uint16_t devID = getDeviceID();
-        return ((devID & ksfINA2XXDeviceIDMask) == ksfINA228DeviceIDValue);
+        uint16_t devID = 0;
+        if (getDeviceID(devID) != ksfTkErrOk)
+            return false;
+
+        return ((devID & kDeviceIDMask) == kINA228DeviceIDValue);
     }
 
   private:
@@ -146,13 +152,13 @@ class SfeINA237ArdI2C : public sfDevINA237
      * 2. Calls the base class begin() to set the bus and configure byte order
      * 3. Verifies the device is connected via ping and Device ID check
      *
-     * @param address 7-bit I2C address (default: 0x45)
+     * @param address 7-bit I2C address (default: 0x40)
      * @param wirePort TwoWire instance for I2C communication (default: Wire)
      *
      * @return true If initialization is successful
      * @return false If any step fails
      */
-    bool begin(const uint8_t &address = ksfINA2XXDefaultAddr, TwoWire &wirePort = Wire)
+    bool begin(uint8_t address = kI2CAddress, TwoWire &wirePort = Wire)
     {
         if (_theI2CBus.init(wirePort, address) != ksfTkErrOk)
             return false;
@@ -178,8 +184,13 @@ class SfeINA237ArdI2C : public sfDevINA237
         if (_theI2CBus.ping() != ksfTkErrOk)
             return false;
 
-        uint16_t devID = getDeviceID();
-        return ((devID & ksfINA2XXDeviceIDMask) == ksfINA237DeviceIDValue);
+        // Accept both INA237 (0x237x) and INA238 (0x238x) — they are register-compatible.
+        uint16_t devID = 0;
+        if (getDeviceID(devID) != ksfTkErrOk)
+            return false;
+
+        uint16_t maskedID = devID & kDeviceIDMask;
+        return (maskedID == kINA237DeviceIDValue || maskedID == kINA238DeviceIDValue);
     }
 
   private:

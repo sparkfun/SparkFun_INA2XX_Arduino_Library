@@ -10,6 +10,9 @@
  *   - Lower-precision LSB scaling (5 uV shunt, 3.125 mV bus, 125 m-deg-C temp)
  *   - Calibration using scale constant 819.2 x 10^6
  *
+ * Like the base class, every method returns a SparkFun Toolkit error code; measured values are
+ * returned through reference (output) parameters.
+ *
  * @author SparkFun Electronics
  * @date 2025
  * @copyright Copyright (c) 2025, SparkFun Electronics Inc. This project is released under the MIT License.
@@ -42,58 +45,78 @@ class sfDevINA237 : public sfDevINA2XX
     /// then calculates SHUNT_CAL = 819.2e6 * CURRENT_LSB * Rshunt (x4 if ADCRANGE=1).
     /// Stores _currentLSB and _shuntRes internally for engineering-unit conversions.
     /// @param shuntResOhms Shunt resistance in Ohms (e.g., 0.015 for 15 mOhm).
-    /// @param maxCurrent_A Maximum expected current in Amps.
-    /// @return True on success, false on error.
-    bool calibrate(float shuntResOhms, float maxCurrent_A);
+    /// @param maxCurrentA Maximum expected current in Amps.
+    /// @return ::ksfTkErrOk on success, ::ksfTkErrFail for invalid arguments, or an error code on
+    /// communication failure.
+    sfTkError_t calibrate(float shuntResOhms, float maxCurrentA);
 
     // ========================= Measurements (Engineering Units) ==============
 
     /// @brief Read the shunt voltage in millivolts.
     /// @details Reads the 16-bit VSHUNT register (two's complement) and scales by
     /// 5 uV/LSB (ADCRANGE=0) or 1.25 uV/LSB (ADCRANGE=1).
-    /// @return Shunt voltage in mV, or 0.0 on error.
-    float getShuntVoltage_mV(void);
+    /// @param milliVolts Output reference that receives the shunt voltage in mV.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getShuntVoltage_mV(float &milliVolts);
 
     /// @brief Read the bus voltage in Volts.
     /// @details Reads the 16-bit VBUS register (unsigned) and scales by 3.125 mV/LSB.
-    /// @return Bus voltage in V, or 0.0 on error.
-    float getBusVoltage_V(void);
+    /// @param volts Output reference that receives the bus voltage in V.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getBusVoltage_V(float &volts);
 
     /// @brief Read the calculated current in Amps.
     /// @details Reads the 16-bit CURRENT register (two's complement) and scales by
     /// CURRENT_LSB (set during calibrate()).
     /// @note calibrate() must be called before this method returns meaningful values.
-    /// @return Current in A, or 0.0 on error.
-    float getCurrent_A(void);
+    /// @param amps Output reference that receives the current in A.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getCurrent_A(float &amps);
 
     /// @brief Read the calculated power in Watts.
     /// @details Reads the 24-bit POWER register (unsigned) and scales by
     /// 0.2 * CURRENT_LSB (set during calibrate()).
     /// @note calibrate() must be called before this method returns meaningful values.
-    /// @return Power in W, or 0.0 on error.
-    float getPower_W(void);
+    /// @param watts Output reference that receives the power in W.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getPower_W(float &watts);
 
     /// @brief Read the die temperature in degrees Celsius.
     /// @details Reads the 16-bit DIETEMP register; data is in bits [15:4] as a 12-bit
     /// two's complement value. Scales by 125 m-deg-C/LSB.
-    /// @return Temperature in deg-C, or 0.0 on error.
-    float getDieTemp_C(void);
+    /// @param celsius Output reference that receives the temperature in deg-C.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getDieTemp_C(float &celsius);
 
     // ========================= Raw Register Access ===========================
 
     /// @brief Read the raw 16-bit shunt voltage value.
-    /// @return Signed 16-bit value, or 0 on error.
-    int16_t getShuntVoltageRaw(void);
+    /// @param value Output reference that receives the signed 16-bit value.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getShuntVoltageRaw(int16_t &value);
 
     /// @brief Read the raw 16-bit bus voltage value.
-    /// @return Unsigned 16-bit value, or 0 on error.
-    uint16_t getBusVoltageRaw(void);
+    /// @param value Output reference that receives the unsigned 16-bit value.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getBusVoltageRaw(uint16_t &value);
 
     /// @brief Read the raw 16-bit current value.
-    /// @return Signed 16-bit value, or 0 on error.
-    int16_t getCurrentRaw(void);
+    /// @param value Output reference that receives the signed 16-bit value.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getCurrentRaw(int16_t &value);
 
     /// @brief Read the raw 24-bit power value.
-    /// @return Unsigned 24-bit value, or 0 on error.
-    uint32_t getPowerRaw(void);
+    /// @param value Output reference that receives the unsigned 24-bit value.
+    /// @return ::ksfTkErrOk on success, or an error code on failure.
+    sfTkError_t getPowerRaw(uint32_t &value);
+
+  protected:
+    // --- INA237 scaling and calibration constants ---
+    static constexpr float kCalScale = 819.2e6f;        ///< Calibration scale constant.
+    static constexpr float kShuntLSBDefault = 5.0e-6f;  ///< Shunt LSB in volts (ADCRANGE = 0).
+    static constexpr float kShuntLSBReduced = 1.25e-6f; ///< Shunt LSB in volts (ADCRANGE = 1).
+    static constexpr float kBusLSB = 3.125e-3f;         ///< Bus voltage LSB in volts.
+    static constexpr float kTempLSB = 125.0e-3f;        ///< Die temperature LSB in deg-C.
+    static constexpr float kCurrentFullScale = 32768.0f; ///< 2^15, positive half of the 16-bit ADC.
+    static constexpr float kPowerLSBScale = 0.2f;       ///< Power LSB = 0.2 x CURRENT_LSB.
 };
