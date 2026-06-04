@@ -27,36 +27,29 @@
 
 #include "sfDevINA237.h"
 
-// INA237 calibration scale constant.
-static const float kINA237CalScale = 819.2e6f;
-
-// INA237 shunt voltage LSB in volts.
-static const float kINA237ShuntLSBDefault = 5.0e-6f;    // ADCRANGE = 0
-static const float kINA237ShuntLSBReduced = 1.25e-6f;   // ADCRANGE = 1
-
-// INA237 bus voltage LSB in volts.
-static const float kINA237BusLSB = 3.125e-3f;
-
-// INA237 die temperature LSB in degrees C.
-static const float kINA237TempLSB = 125.0e-3f;
-
 // ========================= Calibration ======================================
 
-bool sfDevINA237::calibrate(float shuntResOhms, float maxCurrent_A)
+sfTkError_t sfDevINA237::calibrate(float shuntResOhms, float maxCurrentA)
 {
-    if (!_theBus || shuntResOhms <= 0.0f || maxCurrent_A <= 0.0f)
-        return false;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    if (shuntResOhms <= 0.0f || maxCurrentA <= 0.0f)
+        return ksfTkErrFail;
 
     _shuntRes = shuntResOhms;
 
     // CURRENT_LSB = MaxCurrent / 2^15  (16-bit ADC, positive half of range)
-    _currentLSB = maxCurrent_A / 32768.0f;
+    _currentLSB = maxCurrentA / kCurrentFullScale;
 
     // SHUNT_CAL = 819.2 x 10^6 x CURRENT_LSB x Rshunt
-    float calValue = kINA237CalScale * _currentLSB * _shuntRes;
+    float calValue = kCalScale * _currentLSB * _shuntRes;
 
-    // If ADCRANGE = 1, multiply by 4.
-    _adcRange = getADCRange();
+    // If ADCRANGE = 1, multiply by 4. Refresh the cached range from the device first.
+    sfTkError_t rc = getADCRange(_adcRange);
+    if (rc != ksfTkErrOk)
+        return rc;
+
     if (_adcRange)
         calValue *= 4.0f;
 
@@ -70,103 +63,106 @@ bool sfDevINA237::calibrate(float shuntResOhms, float maxCurrent_A)
 
 // ========================= Measurements (Engineering Units) =================
 
-float sfDevINA237::getShuntVoltage_mV(void)
+sfTkError_t sfDevINA237::getShuntVoltage_mV(float &milliVolts)
 {
-    int16_t raw = getShuntVoltageRaw();
+    int16_t raw = 0;
+    sfTkError_t rc = getShuntVoltageRaw(raw);
+    if (rc != ksfTkErrOk)
+        return rc;
 
-    // Select LSB based on ADC range.
-    float lsb = _adcRange ? kINA237ShuntLSBReduced : kINA237ShuntLSBDefault;
-
-    // Convert to millivolts (LSB is in volts).
-    return (float)raw * lsb * 1000.0f;
+    // Select LSB based on ADC range, then convert to millivolts (LSB is in volts).
+    float lsb = _adcRange ? kShuntLSBReduced : kShuntLSBDefault;
+    milliVolts = (float)raw * lsb * 1000.0f;
+    return ksfTkErrOk;
 }
 
-float sfDevINA237::getBusVoltage_V(void)
+sfTkError_t sfDevINA237::getBusVoltage_V(float &volts)
 {
-    uint16_t raw = getBusVoltageRaw();
+    uint16_t raw = 0;
+    sfTkError_t rc = getBusVoltageRaw(raw);
+    if (rc != ksfTkErrOk)
+        return rc;
 
-    return (float)raw * kINA237BusLSB;
+    volts = (float)raw * kBusLSB;
+    return ksfTkErrOk;
 }
 
-float sfDevINA237::getCurrent_A(void)
+sfTkError_t sfDevINA237::getCurrent_A(float &amps)
 {
-    int16_t raw = getCurrentRaw();
+    int16_t raw = 0;
+    sfTkError_t rc = getCurrentRaw(raw);
+    if (rc != ksfTkErrOk)
+        return rc;
 
-    return (float)raw * _currentLSB;
+    amps = (float)raw * _currentLSB;
+    return ksfTkErrOk;
 }
 
-float sfDevINA237::getPower_W(void)
+sfTkError_t sfDevINA237::getPower_W(float &watts)
 {
-    uint32_t raw = getPowerRaw();
+    uint32_t raw = 0;
+    sfTkError_t rc = getPowerRaw(raw);
+    if (rc != ksfTkErrOk)
+        return rc;
 
     // Power LSB = 0.2 x CURRENT_LSB.
-    return (float)raw * 0.2f * _currentLSB;
+    watts = (float)raw * kPowerLSBScale * _currentLSB;
+    return ksfTkErrOk;
 }
 
-float sfDevINA237::getDieTemp_C(void)
+sfTkError_t sfDevINA237::getDieTemp_C(float &celsius)
 {
-    if (!_theBus)
-        return 0.0f;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
     uint16_t raw = 0;
-    if (_theBus->readRegister(ksfINA2XXRegDieTemp, raw) != ksfTkErrOk)
-        return 0.0f;
+    sfTkError_t rc = _theBus->readRegister(kRegDieTemp, raw);
+    if (rc != ksfTkErrOk)
+        return rc;
 
     // Data is in bits [15:4]; shift right by 4 to get a 12-bit two's complement value.
     int16_t signedRaw = ((int16_t)raw) >> 4;
 
-    return (float)signedRaw * kINA237TempLSB;
+    celsius = (float)signedRaw * kTempLSB;
+    return ksfTkErrOk;
 }
 
 // ========================= Raw Register Access ==============================
 
-int16_t sfDevINA237::getShuntVoltageRaw(void)
+sfTkError_t sfDevINA237::getShuntVoltageRaw(int16_t &value)
 {
-    if (!_theBus)
-        return 0;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
     uint16_t raw = 0;
-    if (_theBus->readRegister(ksfINA2XXRegVShunt, raw) != ksfTkErrOk)
-        return 0;
-
+    sfTkError_t rc = _theBus->readRegister(kRegVShunt, raw);
     // VSHUNT is a 16-bit two's complement value.
-    return (int16_t)raw;
+    value = (int16_t)raw;
+    return rc;
 }
 
-uint16_t sfDevINA237::getBusVoltageRaw(void)
+sfTkError_t sfDevINA237::getBusVoltageRaw(uint16_t &value)
 {
-    if (!_theBus)
-        return 0;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
-    uint16_t raw = 0;
-    if (_theBus->readRegister(ksfINA2XXRegVBus, raw) != ksfTkErrOk)
-        return 0;
-
-    return raw;
+    return _theBus->readRegister(kRegVBus, value);
 }
 
-int16_t sfDevINA237::getCurrentRaw(void)
+sfTkError_t sfDevINA237::getCurrentRaw(int16_t &value)
 {
-    if (!_theBus)
-        return 0;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
     uint16_t raw = 0;
-    if (_theBus->readRegister(ksfINA2XXRegCurrent, raw) != ksfTkErrOk)
-        return 0;
-
+    sfTkError_t rc = _theBus->readRegister(kRegCurrent, raw);
     // CURRENT is a 16-bit two's complement value.
-    return (int16_t)raw;
+    value = (int16_t)raw;
+    return rc;
 }
 
-uint32_t sfDevINA237::getPowerRaw(void)
+sfTkError_t sfDevINA237::getPowerRaw(uint32_t &value)
 {
-    if (!_theBus)
-        return 0;
-
-    uint32_t raw = 0;
-    if (_readRegister24(ksfINA2XXRegPower, raw) != ksfTkErrOk)
-        return 0;
-
     // All 24 bits are data (unsigned).
-    return raw;
+    return readRegister24(kRegPower, value);
 }

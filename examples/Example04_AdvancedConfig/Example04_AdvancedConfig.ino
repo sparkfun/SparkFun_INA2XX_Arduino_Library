@@ -1,12 +1,15 @@
 /*
   Example 04 - Advanced Configuration
 
-  This example demonstrates advanced ADC configuration options for the INA228:
+  This example demonstrates advanced ADC configuration options:
     - Changing the operating mode (continuous vs. triggered)
     - Setting conversion times for bus, shunt, and temperature channels
     - Configuring ADC averaging for noise reduction
     - Using shunt temperature compensation with a tempco value
     - Selecting the reduced ADC range for higher precision at low currents
+
+  The sketch auto-detects whether an INA228 or INA237 is connected.
+  All ADC configuration registers are shared between both devices.
 
   SparkFun Electronics
   Date: 2025
@@ -14,7 +17,7 @@
     Please see LICENSE.md for further details.
 
   Hardware Connections:
-  IoT RedBoard --> INA228
+  IoT RedBoard --> INA228 or INA237
   QWIIC --> QWIIC
 
   Connect your load across the screw terminals.
@@ -27,97 +30,179 @@
 
 #include <SparkFun_INA2XX.h>
 
-SfeINA228ArdI2C myPowerMonitor;
+SfeINA228ArdI2C myINA228;
+SfeINA237ArdI2C myINA237;
+
+bool isINA228 = false;
 
 void setup()
 {
     Serial.begin(115200);
     delay(1000);
-    Serial.println("INA228 Example 04 - Advanced Configuration");
+    Serial.println("INA2XX Example 04 - Advanced Configuration (Auto-Detect)");
 
     Wire.begin();
 
-    if (!myPowerMonitor.begin())
+    // Auto-detect which device is connected.
+    if (myINA228.begin())
     {
-        Serial.println("INA228 not found. Please check wiring. Freezing...");
+        Serial.println("INA228 detected!");
+        isINA228 = true;
+    }
+    else if (myINA237.begin())
+    {
+        Serial.println("INA237 detected!");
+        isINA228 = false;
+    }
+    else
+    {
+        Serial.println("No INA228 or INA237 found. Please check wiring. Freezing...");
         while (1)
             delay(1000);
     }
-
-    Serial.println("INA228 connected!");
 
     // --- ADC Range ---
     // Use the reduced range (+/-40.96mV) for higher precision at low currents.
     // This gives 4x better resolution but limits the max measurable shunt voltage.
     // With a 15 mOhm shunt: max current = 40.96 mV / 15 mOhm = 2.73 A.
     // Use the default range (+/-163.84mV) for higher currents (up to ~10.9A).
-    myPowerMonitor.setADCRange(false);  // false = default +/-163.84mV range
+    if (isINA228)
+        myINA228.setADCRange(false);  // false = default +/-163.84mV range
+    else
+        myINA237.setADCRange(false);
 
     // Calibrate for 15 mOhm shunt, 10A max.
     // NOTE: calibrate() reads the current ADCRANGE setting internally,
     // so always call setADCRange() BEFORE calibrate().
-    myPowerMonitor.calibrate(0.015, 10.0);
+    if ((isINA228 ? myINA228.calibrate(0.015, 10.0) : myINA237.calibrate(0.015, 10.0)) != ksfTkErrOk)
+    {
+        Serial.println("Calibration failed. Freezing...");
+        while (1)
+            delay(1000);
+    }
 
     // --- Conversion Times ---
     // Longer conversion times improve measurement accuracy at the cost of speed.
     // Default is 1052us for all channels.
-    myPowerMonitor.setBusVoltageConvTime(INA2XX_CONV_1052US);
-    myPowerMonitor.setShuntVoltageConvTime(INA2XX_CONV_1052US);
-    myPowerMonitor.setTempConvTime(INA2XX_CONV_540US);  // Temp can be faster
+    if (isINA228)
+    {
+        myINA228.setBusVoltageConvTime(INA2XX_CONV_1052US);
+        myINA228.setShuntVoltageConvTime(INA2XX_CONV_1052US);
+        myINA228.setTempConvTime(INA2XX_CONV_540US);  // Temp can be faster
+    }
+    else
+    {
+        myINA237.setBusVoltageConvTime(INA2XX_CONV_1052US);
+        myINA237.setShuntVoltageConvTime(INA2XX_CONV_1052US);
+        myINA237.setTempConvTime(INA2XX_CONV_540US);
+    }
 
     // --- Averaging ---
     // ADC averaging reduces noise by averaging multiple samples internally.
     // The output register updates only after all samples are collected.
     // 16 samples at 1052us each = ~17ms per update for bus+shunt.
-    myPowerMonitor.setAveragingCount(INA2XX_AVG_16);
+    if (isINA228)
+        myINA228.setAveragingCount(INA2XX_AVG_16);
+    else
+        myINA237.setAveragingCount(INA2XX_AVG_16);
 
     // --- Operating Mode ---
-    // Continuous mode: the INA228 continuously converts all enabled channels.
+    // Continuous mode: the device continuously converts all enabled channels.
     // Triggered mode: a single conversion is performed, then the device goes idle.
-    myPowerMonitor.setADCMode(INA2XX_MODE_CONT_ALL);  // Continuous bus + shunt + temp
+    if (isINA228)
+        myINA228.setADCMode(INA2XX_MODE_CONT_ALL);  // Continuous bus + shunt + temp
+    else
+        myINA237.setADCMode(INA2XX_MODE_CONT_ALL);
 
     // --- Temperature Compensation ---
     // If you know the temperature coefficient of your shunt resistor, you can
-    // enable automatic compensation. The INA228 adjusts the calibration based on
+    // enable automatic compensation. The device adjusts the calibration based on
     // its die temperature measurement.
     // Typical copper-trace shunt tempco: ~3930 ppm/deg-C.
     // Typical precision resistor tempco: 10-50 ppm/deg-C.
     // Set to 0 to disable (or just don't enable it).
-    // myPowerMonitor.setShuntTempCoefficient(15);   // e.g., 15 ppm/deg-C
-    // myPowerMonitor.enableTempCompensation(true);
+    // if (isINA228)
+    // {
+    //     myINA228.setShuntTempCoefficient(15);   // e.g., 15 ppm/deg-C
+    //     myINA228.enableTempCompensation(true);
+    // }
+    // else
+    // {
+    //     myINA237.setShuntTempCoefficient(15);
+    //     myINA237.enableTempCompensation(true);
+    // }
 
-    // Print the configuration.
+    // Print the configuration. Pointer to the base class so we read each setting once,
+    // regardless of which device was detected. Every getter returns its value through a
+    // reference argument and reports a Toolkit error code.
+    sfDevINA2XX *dev = isINA228 ? (sfDevINA2XX *)&myINA228 : (sfDevINA2XX *)&myINA237;
+
+    bool reducedRange = false;
+    sfe_ina2xx_mode_t mode = INA2XX_MODE_CONT_ALL;
+    sfe_ina2xx_conv_time_t busCT = INA2XX_CONV_1052US, shuntCT = INA2XX_CONV_1052US, tempCT = INA2XX_CONV_1052US;
+    sfe_ina2xx_avg_count_t avg = INA2XX_AVG_1;
+    bool tempComp = false;
+    uint16_t shuntCal = 0;
+
+    dev->getADCRange(reducedRange);
+    dev->getADCMode(mode);
+    dev->getBusVoltageConvTime(busCT);
+    dev->getShuntVoltageConvTime(shuntCT);
+    dev->getTempConvTime(tempCT);
+    dev->getAveragingCount(avg);
+    dev->getTempCompensation(tempComp);
+    dev->getShuntCal(shuntCal);
+
     Serial.println();
     Serial.println("Configuration:");
     Serial.print("  ADC Range:     ");
-    Serial.println(myPowerMonitor.getADCRange() ? "+/-40.96 mV" : "+/-163.84 mV");
+    Serial.println(reducedRange ? "+/-40.96 mV" : "+/-163.84 mV");
     Serial.print("  ADC Mode:      0x");
-    Serial.println(myPowerMonitor.getADCMode(), HEX);
+    Serial.println((uint8_t)mode, HEX);
     Serial.print("  Bus Conv Time: ");
-    Serial.println(myPowerMonitor.getBusVoltageConvTime());
+    Serial.println((uint8_t)busCT);
     Serial.print("  Shunt Conv:    ");
-    Serial.println(myPowerMonitor.getShuntVoltageConvTime());
+    Serial.println((uint8_t)shuntCT);
     Serial.print("  Temp Conv:     ");
-    Serial.println(myPowerMonitor.getTempConvTime());
+    Serial.println((uint8_t)tempCT);
     Serial.print("  Averaging:     ");
-    Serial.println(myPowerMonitor.getAveragingCount());
+    Serial.println((uint8_t)avg);
     Serial.print("  Temp Comp:     ");
-    Serial.println(myPowerMonitor.getTempCompensation() ? "Enabled" : "Disabled");
+    Serial.println(tempComp ? "Enabled" : "Disabled");
     Serial.print("  SHUNT_CAL:     0x");
-    Serial.println(myPowerMonitor.getShuntCal(), HEX);
+    Serial.println(shuntCal, HEX);
+
     Serial.println();
 }
 
 void loop()
 {
+    sfDevINA2XX *dev = isINA228 ? (sfDevINA2XX *)&myINA228 : (sfDevINA2XX *)&myINA237;
+
+    bool ready = false;
+    dev->isConversionReady(ready);
+
     // Wait for conversion to complete before reading.
-    if (myPowerMonitor.isConversionReady())
+    if (ready)
     {
-        float busVoltage = myPowerMonitor.getBusVoltage_V();
-        float shuntVoltage = myPowerMonitor.getShuntVoltage_mV();
-        float current = myPowerMonitor.getCurrent_A();
-        float power = myPowerMonitor.getPower_W();
-        float temperature = myPowerMonitor.getDieTemp_C();
+        float busVoltage = 0.0f, shuntVoltage = 0.0f, current = 0.0f, power = 0.0f, temperature = 0.0f;
+
+        if (isINA228)
+        {
+            myINA228.getBusVoltage_V(busVoltage);
+            myINA228.getShuntVoltage_mV(shuntVoltage);
+            myINA228.getCurrent_A(current);
+            myINA228.getPower_W(power);
+            myINA228.getDieTemp_C(temperature);
+        }
+        else
+        {
+            myINA237.getBusVoltage_V(busVoltage);
+            myINA237.getShuntVoltage_mV(shuntVoltage);
+            myINA237.getCurrent_A(current);
+            myINA237.getPower_W(power);
+            myINA237.getDieTemp_C(temperature);
+        }
 
         Serial.print("Bus: ");
         Serial.print(busVoltage, 4);

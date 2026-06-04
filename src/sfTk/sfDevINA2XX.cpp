@@ -7,6 +7,11 @@
  * shared registers on the INA228 and INA237 power monitor ICs. Device-specific measurement
  * methods are in sfDevINA228.cpp and sfDevINA237.cpp.
  *
+ * Configuration registers (CONFIG, ADC_CONFIG, DIAG_ALRT) are accessed through bitfield unions:
+ * the register word is read into the union, the relevant field is modified, and the word is
+ * written back. Every method returns a SparkFun Toolkit error code so callers can detect and
+ * propagate communication failures.
+ *
  * @author SparkFun Electronics
  * @date 2025
  * @copyright Copyright (c) 2025, SparkFun Electronics Inc. All rights reserved.
@@ -18,25 +23,22 @@
 
 #include "sfDevINA2XX.h"
 
-#define DEBUG_SERIAL_PRINTS (0)
-#if DEBUG_SERIAL_PRINTS
-#include "Arduino.h"
-#endif
-
 // ========================= Setup & Identity =================================
 
-bool sfDevINA2XX::begin(sfTkIBus *theBus)
+sfTkError_t sfDevINA2XX::begin(sfTkIBus *theBus)
 {
-    if (!_theBus && !theBus)
-        return false;
-
+    // Adopt the supplied bus if one was provided; otherwise keep any bus set by a prior begin().
     if (theBus != nullptr)
-        setCommunicationBus(theBus);
+        _theBus = theBus;
+
+    // We need a bus to talk to.
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
     // INA228/INA237 are big-endian for register data.
     _theBus->setByteOrder(sfTkByteOrder::BigEndian);
 
-    return true;
+    return ksfTkErrOk;
 }
 
 void sfDevINA2XX::setCommunicationBus(sfTkIBus *theBus)
@@ -44,520 +46,671 @@ void sfDevINA2XX::setCommunicationBus(sfTkIBus *theBus)
     _theBus = theBus;
 }
 
-uint16_t sfDevINA2XX::getManufacturerID(void)
+sfTkError_t sfDevINA2XX::getManufacturerID(uint16_t &id)
 {
-    uint16_t value = 0;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
-    if (!_theBus)
-        return 0;
-
-    if (_theBus->readRegister(ksfINA2XXRegManufacturerID, value) != ksfTkErrOk)
-        return 0;
-
-    return value;
+    return _theBus->readRegister(kRegManufacturerID, id);
 }
 
-uint16_t sfDevINA2XX::getDeviceID(void)
+sfTkError_t sfDevINA2XX::getDeviceID(uint16_t &id)
 {
-    uint16_t value = 0;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
-    if (!_theBus)
-        return 0;
-
-    if (_theBus->readRegister(ksfINA2XXRegDeviceID, value) != ksfTkErrOk)
-        return 0;
-
-    return value;
+    return _theBus->readRegister(kRegDeviceID, id);
 }
 
-bool sfDevINA2XX::reset(void)
+sfTkError_t sfDevINA2XX::reset(void)
 {
-    if (!_theBus)
-        return false;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
-    // Read current CONFIG, set the RST bit, and write back.
-    uint16_t config = 0;
-    if (_theBus->readRegister(ksfINA2XXRegConfig, config) != ksfTkErrOk)
-        return false;
+    sfe_ina2xx_config_reg_t config = {};
+    sfTkError_t rc = _theBus->readRegister(kRegConfig, config.word);
+    if (rc != ksfTkErrOk)
+        return rc;
 
-    config |= ksfINA2XXConfigRst;
+    config.rst = 1;
 
-    return (_theBus->writeRegister(ksfINA2XXRegConfig, config) == ksfTkErrOk);
+    return _theBus->writeRegister(kRegConfig, config.word);
 }
 
-bool sfDevINA2XX::resetAccumulators(void)
+sfTkError_t sfDevINA2XX::resetAccumulators(void)
 {
-    return _setRegisterBit(ksfINA2XXRegConfig, ksfINA2XXConfigRstAcc, true);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_config_reg_t config = {};
+    sfTkError_t rc = _theBus->readRegister(kRegConfig, config.word);
+    if (rc != ksfTkErrOk)
+        return rc;
+
+    config.rstAcc = 1;
+
+    return _theBus->writeRegister(kRegConfig, config.word);
 }
 
 // ========================= CONFIG Register (0x00) ===========================
 
-bool sfDevINA2XX::setADCRange(bool reducedRange)
+sfTkError_t sfDevINA2XX::setADCRange(bool reducedRange)
 {
-    bool result = _setRegisterBit(ksfINA2XXRegConfig, ksfINA2XXConfigAdcRange, reducedRange);
-    if (result)
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_config_reg_t config = {};
+    sfTkError_t rc = _theBus->readRegister(kRegConfig, config.word);
+    if (rc != ksfTkErrOk)
+        return rc;
+
+    config.adcRange = reducedRange ? 1 : 0;
+
+    rc = _theBus->writeRegister(kRegConfig, config.word);
+    if (rc == ksfTkErrOk)
         _adcRange = reducedRange;
-    return result;
+
+    return rc;
 }
 
-bool sfDevINA2XX::getADCRange(void)
+sfTkError_t sfDevINA2XX::getADCRange(bool &reducedRange)
 {
-    _adcRange = _getRegisterBit(ksfINA2XXRegConfig, ksfINA2XXConfigAdcRange);
-    return _adcRange;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_config_reg_t config = {};
+    sfTkError_t rc = _theBus->readRegister(kRegConfig, config.word);
+    reducedRange = config.adcRange != 0;
+    if (rc == ksfTkErrOk)
+        _adcRange = reducedRange;
+
+    return rc;
 }
 
-bool sfDevINA2XX::setConversionDelay(uint8_t delay2ms)
+sfTkError_t sfDevINA2XX::setConversionDelay(uint8_t delay2ms)
 {
-    return _setRegisterField(ksfINA2XXRegConfig, ksfINA2XXConfigConvDlyMask,
-                             ksfINA2XXConfigConvDlyShift, delay2ms);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_config_reg_t config = {};
+    sfTkError_t rc = _theBus->readRegister(kRegConfig, config.word);
+    if (rc != ksfTkErrOk)
+        return rc;
+
+    config.convDly = delay2ms;
+
+    return _theBus->writeRegister(kRegConfig, config.word);
 }
 
-uint8_t sfDevINA2XX::getConversionDelay(void)
+sfTkError_t sfDevINA2XX::getConversionDelay(uint8_t &delay2ms)
 {
-    return _getRegisterField(ksfINA2XXRegConfig, ksfINA2XXConfigConvDlyMask,
-                             ksfINA2XXConfigConvDlyShift);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_config_reg_t config = {};
+    sfTkError_t rc = _theBus->readRegister(kRegConfig, config.word);
+    delay2ms = (uint8_t)config.convDly;
+    return rc;
 }
 
-bool sfDevINA2XX::enableTempCompensation(bool enable)
+sfTkError_t sfDevINA2XX::enableTempCompensation(bool enable)
 {
-    return _setRegisterBit(ksfINA2XXRegConfig, ksfINA2XXConfigTempComp, enable);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_config_reg_t config = {};
+    sfTkError_t rc = _theBus->readRegister(kRegConfig, config.word);
+    if (rc != ksfTkErrOk)
+        return rc;
+
+    config.tempComp = enable ? 1 : 0;
+
+    return _theBus->writeRegister(kRegConfig, config.word);
 }
 
-bool sfDevINA2XX::getTempCompensation(void)
+sfTkError_t sfDevINA2XX::getTempCompensation(bool &enabled)
 {
-    return _getRegisterBit(ksfINA2XXRegConfig, ksfINA2XXConfigTempComp);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_config_reg_t config = {};
+    sfTkError_t rc = _theBus->readRegister(kRegConfig, config.word);
+    enabled = config.tempComp != 0;
+    return rc;
 }
 
 // ====================== ADC_CONFIG Register (0x01) ==========================
 
-bool sfDevINA2XX::setADCMode(sfe_ina2xx_mode_t mode)
+sfTkError_t sfDevINA2XX::setADCMode(sfe_ina2xx_mode_t mode)
 {
-    return _setRegisterField(ksfINA2XXRegAdcConfig, ksfINA2XXAdcConfigModeMask,
-                             ksfINA2XXAdcConfigModeShift, (uint8_t)mode);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_adc_config_reg_t adc = {};
+    sfTkError_t rc = _theBus->readRegister(kRegAdcConfig, adc.word);
+    if (rc != ksfTkErrOk)
+        return rc;
+
+    adc.mode = (uint16_t)mode;
+
+    return _theBus->writeRegister(kRegAdcConfig, adc.word);
 }
 
-sfe_ina2xx_mode_t sfDevINA2XX::getADCMode(void)
+sfTkError_t sfDevINA2XX::getADCMode(sfe_ina2xx_mode_t &mode)
 {
-    return (sfe_ina2xx_mode_t)_getRegisterField(ksfINA2XXRegAdcConfig,
-                                                 ksfINA2XXAdcConfigModeMask,
-                                                 ksfINA2XXAdcConfigModeShift);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_adc_config_reg_t adc = {};
+    sfTkError_t rc = _theBus->readRegister(kRegAdcConfig, adc.word);
+    mode = (sfe_ina2xx_mode_t)adc.mode;
+    return rc;
 }
 
-bool sfDevINA2XX::setBusVoltageConvTime(sfe_ina2xx_conv_time_t time)
+sfTkError_t sfDevINA2XX::setBusVoltageConvTime(sfe_ina2xx_conv_time_t time)
 {
-    return _setRegisterField(ksfINA2XXRegAdcConfig, ksfINA2XXAdcConfigVBusCTMask,
-                             ksfINA2XXAdcConfigVBusCTShift, (uint8_t)time);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_adc_config_reg_t adc = {};
+    sfTkError_t rc = _theBus->readRegister(kRegAdcConfig, adc.word);
+    if (rc != ksfTkErrOk)
+        return rc;
+
+    adc.vbusct = (uint16_t)time;
+
+    return _theBus->writeRegister(kRegAdcConfig, adc.word);
 }
 
-sfe_ina2xx_conv_time_t sfDevINA2XX::getBusVoltageConvTime(void)
+sfTkError_t sfDevINA2XX::getBusVoltageConvTime(sfe_ina2xx_conv_time_t &time)
 {
-    return (sfe_ina2xx_conv_time_t)_getRegisterField(ksfINA2XXRegAdcConfig,
-                                                      ksfINA2XXAdcConfigVBusCTMask,
-                                                      ksfINA2XXAdcConfigVBusCTShift);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_adc_config_reg_t adc = {};
+    sfTkError_t rc = _theBus->readRegister(kRegAdcConfig, adc.word);
+    time = (sfe_ina2xx_conv_time_t)adc.vbusct;
+    return rc;
 }
 
-bool sfDevINA2XX::setShuntVoltageConvTime(sfe_ina2xx_conv_time_t time)
+sfTkError_t sfDevINA2XX::setShuntVoltageConvTime(sfe_ina2xx_conv_time_t time)
 {
-    return _setRegisterField(ksfINA2XXRegAdcConfig, ksfINA2XXAdcConfigVShCTMask,
-                             ksfINA2XXAdcConfigVShCTShift, (uint8_t)time);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_adc_config_reg_t adc = {};
+    sfTkError_t rc = _theBus->readRegister(kRegAdcConfig, adc.word);
+    if (rc != ksfTkErrOk)
+        return rc;
+
+    adc.vshct = (uint16_t)time;
+
+    return _theBus->writeRegister(kRegAdcConfig, adc.word);
 }
 
-sfe_ina2xx_conv_time_t sfDevINA2XX::getShuntVoltageConvTime(void)
+sfTkError_t sfDevINA2XX::getShuntVoltageConvTime(sfe_ina2xx_conv_time_t &time)
 {
-    return (sfe_ina2xx_conv_time_t)_getRegisterField(ksfINA2XXRegAdcConfig,
-                                                      ksfINA2XXAdcConfigVShCTMask,
-                                                      ksfINA2XXAdcConfigVShCTShift);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_adc_config_reg_t adc = {};
+    sfTkError_t rc = _theBus->readRegister(kRegAdcConfig, adc.word);
+    time = (sfe_ina2xx_conv_time_t)adc.vshct;
+    return rc;
 }
 
-bool sfDevINA2XX::setTempConvTime(sfe_ina2xx_conv_time_t time)
+sfTkError_t sfDevINA2XX::setTempConvTime(sfe_ina2xx_conv_time_t time)
 {
-    return _setRegisterField(ksfINA2XXRegAdcConfig, ksfINA2XXAdcConfigVTCTMask,
-                             ksfINA2XXAdcConfigVTCTShift, (uint8_t)time);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_adc_config_reg_t adc = {};
+    sfTkError_t rc = _theBus->readRegister(kRegAdcConfig, adc.word);
+    if (rc != ksfTkErrOk)
+        return rc;
+
+    adc.vtct = (uint16_t)time;
+
+    return _theBus->writeRegister(kRegAdcConfig, adc.word);
 }
 
-sfe_ina2xx_conv_time_t sfDevINA2XX::getTempConvTime(void)
+sfTkError_t sfDevINA2XX::getTempConvTime(sfe_ina2xx_conv_time_t &time)
 {
-    return (sfe_ina2xx_conv_time_t)_getRegisterField(ksfINA2XXRegAdcConfig,
-                                                      ksfINA2XXAdcConfigVTCTMask,
-                                                      ksfINA2XXAdcConfigVTCTShift);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_adc_config_reg_t adc = {};
+    sfTkError_t rc = _theBus->readRegister(kRegAdcConfig, adc.word);
+    time = (sfe_ina2xx_conv_time_t)adc.vtct;
+    return rc;
 }
 
-bool sfDevINA2XX::setAveragingCount(sfe_ina2xx_avg_count_t count)
+sfTkError_t sfDevINA2XX::setAveragingCount(sfe_ina2xx_avg_count_t count)
 {
-    return _setRegisterField(ksfINA2XXRegAdcConfig, ksfINA2XXAdcConfigAvgMask,
-                             0, (uint8_t)count);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_adc_config_reg_t adc = {};
+    sfTkError_t rc = _theBus->readRegister(kRegAdcConfig, adc.word);
+    if (rc != ksfTkErrOk)
+        return rc;
+
+    adc.avg = (uint16_t)count;
+
+    return _theBus->writeRegister(kRegAdcConfig, adc.word);
 }
 
-sfe_ina2xx_avg_count_t sfDevINA2XX::getAveragingCount(void)
+sfTkError_t sfDevINA2XX::getAveragingCount(sfe_ina2xx_avg_count_t &count)
 {
-    return (sfe_ina2xx_avg_count_t)_getRegisterField(ksfINA2XXRegAdcConfig,
-                                                      ksfINA2XXAdcConfigAvgMask, 0);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_adc_config_reg_t adc = {};
+    sfTkError_t rc = _theBus->readRegister(kRegAdcConfig, adc.word);
+    count = (sfe_ina2xx_avg_count_t)adc.avg;
+    return rc;
 }
 
 // ================== Calibration Registers (0x02-0x03) =======================
 
-bool sfDevINA2XX::setShuntCal(uint16_t calValue)
+sfTkError_t sfDevINA2XX::setShuntCal(uint16_t calValue)
 {
-    if (!_theBus)
-        return false;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
     // Bit 15 is reserved; mask to 15 bits.
-    calValue &= 0x7FFF;
-    return (_theBus->writeRegister(ksfINA2XXRegShuntCal, calValue) == ksfTkErrOk);
+    return _theBus->writeRegister(kRegShuntCal, (uint16_t)(calValue & kShuntCalMask));
 }
 
-uint16_t sfDevINA2XX::getShuntCal(void)
+sfTkError_t sfDevINA2XX::getShuntCal(uint16_t &calValue)
 {
-    uint16_t value = 0;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
-    if (!_theBus)
-        return 0;
-
-    if (_theBus->readRegister(ksfINA2XXRegShuntCal, value) != ksfTkErrOk)
-        return 0;
-
-    return value & 0x7FFF;
+    sfTkError_t rc = _theBus->readRegister(kRegShuntCal, calValue);
+    calValue &= kShuntCalMask;
+    return rc;
 }
 
-bool sfDevINA2XX::setShuntTempCoefficient(uint16_t ppmPerDegC)
+sfTkError_t sfDevINA2XX::setShuntTempCoefficient(uint16_t ppmPerDegC)
 {
-    if (!_theBus)
-        return false;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
     // Mask to 14 bits (bits [13:0]).
-    ppmPerDegC &= ksfINA2XXShuntTempCoMask;
-    return (_theBus->writeRegister(ksfINA2XXRegShuntTempCo, ppmPerDegC) == ksfTkErrOk);
+    return _theBus->writeRegister(kRegShuntTempCo, (uint16_t)(ppmPerDegC & kShuntTempCoMask));
 }
 
-uint16_t sfDevINA2XX::getShuntTempCoefficient(void)
+sfTkError_t sfDevINA2XX::getShuntTempCoefficient(uint16_t &ppmPerDegC)
 {
-    uint16_t value = 0;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
-    if (!_theBus)
-        return 0;
-
-    if (_theBus->readRegister(ksfINA2XXRegShuntTempCo, value) != ksfTkErrOk)
-        return 0;
-
-    return value & ksfINA2XXShuntTempCoMask;
+    sfTkError_t rc = _theBus->readRegister(kRegShuntTempCo, ppmPerDegC);
+    ppmPerDegC &= kShuntTempCoMask;
+    return rc;
 }
 
 // ================== Diagnostics & Alert (0x0B) ==============================
 
-uint16_t sfDevINA2XX::getDiagnosticFlags(void)
+sfTkError_t sfDevINA2XX::getDiagnosticFlags(sfe_ina2xx_diag_alrt_reg_t &flags)
 {
-    uint16_t value = 0;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
-    if (!_theBus)
-        return 0;
-
-    if (_theBus->readRegister(ksfINA2XXRegDiagAlrt, value) != ksfTkErrOk)
-        return 0;
-
-    return value;
+    return _theBus->readRegister(kRegDiagAlrt, flags.word);
 }
 
-bool sfDevINA2XX::setAlertLatch(bool latched)
+sfTkError_t sfDevINA2XX::setAlertLatch(bool latched)
 {
-    return _setRegisterBit(ksfINA2XXRegDiagAlrt, ksfINA2XXDiagAlatch, latched);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    if (rc != ksfTkErrOk)
+        return rc;
+
+    diag.alatch = latched ? 1 : 0;
+
+    return _theBus->writeRegister(kRegDiagAlrt, diag.word);
 }
 
-bool sfDevINA2XX::getAlertLatch(void)
+sfTkError_t sfDevINA2XX::getAlertLatch(bool &latched)
 {
-    return _getRegisterBit(ksfINA2XXRegDiagAlrt, ksfINA2XXDiagAlatch);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    latched = diag.alatch != 0;
+    return rc;
 }
 
-bool sfDevINA2XX::setConversionReadyAlert(bool enable)
+sfTkError_t sfDevINA2XX::setConversionReadyAlert(bool enable)
 {
-    return _setRegisterBit(ksfINA2XXRegDiagAlrt, ksfINA2XXDiagCnvr, enable);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    if (rc != ksfTkErrOk)
+        return rc;
+
+    diag.cnvr = enable ? 1 : 0;
+
+    return _theBus->writeRegister(kRegDiagAlrt, diag.word);
 }
 
-bool sfDevINA2XX::getConversionReadyAlert(void)
+sfTkError_t sfDevINA2XX::getConversionReadyAlert(bool &enabled)
 {
-    return _getRegisterBit(ksfINA2XXRegDiagAlrt, ksfINA2XXDiagCnvr);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    enabled = diag.cnvr != 0;
+    return rc;
 }
 
-bool sfDevINA2XX::setSlowAlert(bool enable)
+sfTkError_t sfDevINA2XX::setSlowAlert(bool enable)
 {
-    return _setRegisterBit(ksfINA2XXRegDiagAlrt, ksfINA2XXDiagSlowAlert, enable);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    if (rc != ksfTkErrOk)
+        return rc;
+
+    diag.slowAlert = enable ? 1 : 0;
+
+    return _theBus->writeRegister(kRegDiagAlrt, diag.word);
 }
 
-bool sfDevINA2XX::getSlowAlert(void)
+sfTkError_t sfDevINA2XX::getSlowAlert(bool &enabled)
 {
-    return _getRegisterBit(ksfINA2XXRegDiagAlrt, ksfINA2XXDiagSlowAlert);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    enabled = diag.slowAlert != 0;
+    return rc;
 }
 
-bool sfDevINA2XX::setAlertPolarity(bool activeHigh)
+sfTkError_t sfDevINA2XX::setAlertPolarity(bool activeHigh)
 {
-    return _setRegisterBit(ksfINA2XXRegDiagAlrt, ksfINA2XXDiagApol, activeHigh);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    if (rc != ksfTkErrOk)
+        return rc;
+
+    diag.apol = activeHigh ? 1 : 0;
+
+    return _theBus->writeRegister(kRegDiagAlrt, diag.word);
 }
 
-bool sfDevINA2XX::getAlertPolarity(void)
+sfTkError_t sfDevINA2XX::getAlertPolarity(bool &activeHigh)
 {
-    return _getRegisterBit(ksfINA2XXRegDiagAlrt, ksfINA2XXDiagApol);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    activeHigh = diag.apol != 0;
+    return rc;
 }
 
-bool sfDevINA2XX::isEnergyOverflow(void)
+sfTkError_t sfDevINA2XX::isEnergyOverflow(bool &overflow)
 {
-    return _getDiagBit(ksfINA2XXDiagEnergyOF);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    overflow = diag.energyOF != 0;
+    return rc;
 }
 
-bool sfDevINA2XX::isChargeOverflow(void)
+sfTkError_t sfDevINA2XX::isChargeOverflow(bool &overflow)
 {
-    return _getDiagBit(ksfINA2XXDiagChargeOF);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    overflow = diag.chargeOF != 0;
+    return rc;
 }
 
-bool sfDevINA2XX::isMathOverflow(void)
+sfTkError_t sfDevINA2XX::isMathOverflow(bool &overflow)
 {
-    return _getDiagBit(ksfINA2XXDiagMathOF);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    overflow = diag.mathOF != 0;
+    return rc;
 }
 
-bool sfDevINA2XX::isTempOverLimit(void)
+sfTkError_t sfDevINA2XX::isTempOverLimit(bool &overLimit)
 {
-    return _getDiagBit(ksfINA2XXDiagTmpOL);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    overLimit = diag.tmpOL != 0;
+    return rc;
 }
 
-bool sfDevINA2XX::isShuntOverVoltage(void)
+sfTkError_t sfDevINA2XX::isShuntOverVoltage(bool &overVoltage)
 {
-    return _getDiagBit(ksfINA2XXDiagShntOL);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    overVoltage = diag.shntOL != 0;
+    return rc;
 }
 
-bool sfDevINA2XX::isShuntUnderVoltage(void)
+sfTkError_t sfDevINA2XX::isShuntUnderVoltage(bool &underVoltage)
 {
-    return _getDiagBit(ksfINA2XXDiagShntUL);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    underVoltage = diag.shntUL != 0;
+    return rc;
 }
 
-bool sfDevINA2XX::isBusOverVoltage(void)
+sfTkError_t sfDevINA2XX::isBusOverVoltage(bool &overVoltage)
 {
-    return _getDiagBit(ksfINA2XXDiagBusOL);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    overVoltage = diag.busOL != 0;
+    return rc;
 }
 
-bool sfDevINA2XX::isBusUnderVoltage(void)
+sfTkError_t sfDevINA2XX::isBusUnderVoltage(bool &underVoltage)
 {
-    return _getDiagBit(ksfINA2XXDiagBusUL);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    underVoltage = diag.busUL != 0;
+    return rc;
 }
 
-bool sfDevINA2XX::isPowerOverLimit(void)
+sfTkError_t sfDevINA2XX::isPowerOverLimit(bool &overLimit)
 {
-    return _getDiagBit(ksfINA2XXDiagPOL);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    overLimit = diag.pol != 0;
+    return rc;
 }
 
-bool sfDevINA2XX::isConversionReady(void)
+sfTkError_t sfDevINA2XX::isConversionReady(bool &ready)
 {
-    return _getDiagBit(ksfINA2XXDiagCnvrf);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    ready = diag.cnvrf != 0;
+    return rc;
 }
 
-bool sfDevINA2XX::isMemoryValid(void)
+sfTkError_t sfDevINA2XX::isMemoryValid(bool &valid)
 {
-    return _getDiagBit(ksfINA2XXDiagMemStat);
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfe_ina2xx_diag_alrt_reg_t diag = {};
+    sfTkError_t rc = _theBus->readRegister(kRegDiagAlrt, diag.word);
+    valid = diag.memStat != 0;
+    return rc;
 }
 
 // ==================== Threshold Registers (0x0C-0x11) =======================
 
-bool sfDevINA2XX::setShuntOverVoltageThreshold(int16_t threshold)
+sfTkError_t sfDevINA2XX::setShuntOverVoltageThreshold(int16_t threshold)
 {
-    if (!_theBus)
-        return false;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
-    return (_theBus->writeRegister(ksfINA2XXRegSOVL, (uint16_t)threshold) == ksfTkErrOk);
+    return _theBus->writeRegister(kRegSOVL, (uint16_t)threshold);
 }
 
-int16_t sfDevINA2XX::getShuntOverVoltageThreshold(void)
+sfTkError_t sfDevINA2XX::getShuntOverVoltageThreshold(int16_t &threshold)
 {
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
     uint16_t value = 0;
-
-    if (!_theBus)
-        return 0;
-
-    if (_theBus->readRegister(ksfINA2XXRegSOVL, value) != ksfTkErrOk)
-        return 0;
-
-    return (int16_t)value;
+    sfTkError_t rc = _theBus->readRegister(kRegSOVL, value);
+    threshold = (int16_t)value;
+    return rc;
 }
 
-bool sfDevINA2XX::setShuntUnderVoltageThreshold(int16_t threshold)
+sfTkError_t sfDevINA2XX::setShuntUnderVoltageThreshold(int16_t threshold)
 {
-    if (!_theBus)
-        return false;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
-    return (_theBus->writeRegister(ksfINA2XXRegSUVL, (uint16_t)threshold) == ksfTkErrOk);
+    return _theBus->writeRegister(kRegSUVL, (uint16_t)threshold);
 }
 
-int16_t sfDevINA2XX::getShuntUnderVoltageThreshold(void)
+sfTkError_t sfDevINA2XX::getShuntUnderVoltageThreshold(int16_t &threshold)
 {
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
     uint16_t value = 0;
-
-    if (!_theBus)
-        return 0;
-
-    if (_theBus->readRegister(ksfINA2XXRegSUVL, value) != ksfTkErrOk)
-        return 0;
-
-    return (int16_t)value;
+    sfTkError_t rc = _theBus->readRegister(kRegSUVL, value);
+    threshold = (int16_t)value;
+    return rc;
 }
 
-bool sfDevINA2XX::setBusOverVoltageThreshold(uint16_t threshold)
+sfTkError_t sfDevINA2XX::setBusOverVoltageThreshold(uint16_t threshold)
 {
-    if (!_theBus)
-        return false;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
     // Bit 15 is reserved; mask to 15 bits.
-    threshold &= 0x7FFF;
-    return (_theBus->writeRegister(ksfINA2XXRegBOVL, threshold) == ksfTkErrOk);
+    return _theBus->writeRegister(kRegBOVL, (uint16_t)(threshold & kBusThresholdMask));
 }
 
-uint16_t sfDevINA2XX::getBusOverVoltageThreshold(void)
+sfTkError_t sfDevINA2XX::getBusOverVoltageThreshold(uint16_t &threshold)
 {
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfTkError_t rc = _theBus->readRegister(kRegBOVL, threshold);
+    threshold &= kBusThresholdMask;
+    return rc;
+}
+
+sfTkError_t sfDevINA2XX::setBusUnderVoltageThreshold(uint16_t threshold)
+{
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    return _theBus->writeRegister(kRegBUVL, (uint16_t)(threshold & kBusThresholdMask));
+}
+
+sfTkError_t sfDevINA2XX::getBusUnderVoltageThreshold(uint16_t &threshold)
+{
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    sfTkError_t rc = _theBus->readRegister(kRegBUVL, threshold);
+    threshold &= kBusThresholdMask;
+    return rc;
+}
+
+sfTkError_t sfDevINA2XX::setTempLimitThreshold(int16_t threshold)
+{
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    return _theBus->writeRegister(kRegTempLimit, (uint16_t)threshold);
+}
+
+sfTkError_t sfDevINA2XX::getTempLimitThreshold(int16_t &threshold)
+{
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
     uint16_t value = 0;
-
-    if (!_theBus)
-        return 0;
-
-    if (_theBus->readRegister(ksfINA2XXRegBOVL, value) != ksfTkErrOk)
-        return 0;
-
-    return value & 0x7FFF;
+    sfTkError_t rc = _theBus->readRegister(kRegTempLimit, value);
+    threshold = (int16_t)value;
+    return rc;
 }
 
-bool sfDevINA2XX::setBusUnderVoltageThreshold(uint16_t threshold)
+sfTkError_t sfDevINA2XX::setPowerLimitThreshold(uint16_t threshold)
 {
-    if (!_theBus)
-        return false;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
-    threshold &= 0x7FFF;
-    return (_theBus->writeRegister(ksfINA2XXRegBUVL, threshold) == ksfTkErrOk);
+    return _theBus->writeRegister(kRegPowerLimit, threshold);
 }
 
-uint16_t sfDevINA2XX::getBusUnderVoltageThreshold(void)
+sfTkError_t sfDevINA2XX::getPowerLimitThreshold(uint16_t &threshold)
 {
-    uint16_t value = 0;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
-    if (!_theBus)
-        return 0;
-
-    if (_theBus->readRegister(ksfINA2XXRegBUVL, value) != ksfTkErrOk)
-        return 0;
-
-    return value & 0x7FFF;
-}
-
-bool sfDevINA2XX::setTempLimitThreshold(int16_t threshold)
-{
-    if (!_theBus)
-        return false;
-
-    return (_theBus->writeRegister(ksfINA2XXRegTempLimit, (uint16_t)threshold) == ksfTkErrOk);
-}
-
-int16_t sfDevINA2XX::getTempLimitThreshold(void)
-{
-    uint16_t value = 0;
-
-    if (!_theBus)
-        return 0;
-
-    if (_theBus->readRegister(ksfINA2XXRegTempLimit, value) != ksfTkErrOk)
-        return 0;
-
-    return (int16_t)value;
-}
-
-bool sfDevINA2XX::setPowerLimitThreshold(uint16_t threshold)
-{
-    if (!_theBus)
-        return false;
-
-    return (_theBus->writeRegister(ksfINA2XXRegPowerLimit, threshold) == ksfTkErrOk);
-}
-
-uint16_t sfDevINA2XX::getPowerLimitThreshold(void)
-{
-    uint16_t value = 0;
-
-    if (!_theBus)
-        return 0;
-
-    if (_theBus->readRegister(ksfINA2XXRegPowerLimit, value) != ksfTkErrOk)
-        return 0;
-
-    return value;
+    return _theBus->readRegister(kRegPowerLimit, threshold);
 }
 
 // ========================= Protected Helpers ================================
 
-bool sfDevINA2XX::_getDiagBit(uint16_t bitMask)
+sfTkError_t sfDevINA2XX::readRegister24(uint8_t reg, uint32_t &value)
 {
-    uint16_t diag = getDiagnosticFlags();
-    return (diag & bitMask) != 0;
-}
-
-bool sfDevINA2XX::_setRegisterBit(uint8_t reg, uint16_t bitMask, bool set)
-{
-    if (!_theBus)
-        return false;
-
-    uint16_t value = 0;
-    if (_theBus->readRegister(reg, value) != ksfTkErrOk)
-        return false;
-
-    if (set)
-        value |= bitMask;
-    else
-        value &= ~bitMask;
-
-    return (_theBus->writeRegister(reg, value) == ksfTkErrOk);
-}
-
-bool sfDevINA2XX::_getRegisterBit(uint8_t reg, uint16_t bitMask)
-{
-    if (!_theBus)
-        return false;
-
-    uint16_t value = 0;
-    if (_theBus->readRegister(reg, value) != ksfTkErrOk)
-        return false;
-
-    return (value & bitMask) != 0;
-}
-
-bool sfDevINA2XX::_setRegisterField(uint8_t reg, uint16_t mask, uint8_t shift, uint8_t value)
-{
-    if (!_theBus)
-        return false;
-
-    uint16_t regVal = 0;
-    if (_theBus->readRegister(reg, regVal) != ksfTkErrOk)
-        return false;
-
-    regVal &= ~mask;
-    regVal |= ((uint16_t)value << shift) & mask;
-
-    return (_theBus->writeRegister(reg, regVal) == ksfTkErrOk);
-}
-
-uint8_t sfDevINA2XX::_getRegisterField(uint8_t reg, uint16_t mask, uint8_t shift)
-{
-    if (!_theBus)
-        return 0;
-
-    uint16_t value = 0;
-    if (_theBus->readRegister(reg, value) != ksfTkErrOk)
-        return 0;
-
-    return (uint8_t)((value & mask) >> shift);
-}
-
-sfTkError_t sfDevINA2XX::_readRegister24(uint8_t reg, uint32_t &value)
-{
-    if (!_theBus)
-        return ksfTkErrFail;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
     uint8_t buf[3] = {0};
     size_t bytesRead = 0;
 
-    sfTkError_t result = _theBus->readRegister(reg, buf, 3, bytesRead);
-    if (result != ksfTkErrOk)
-        return result;
+    sfTkError_t rc = _theBus->readRegister(reg, buf, 3, bytesRead);
+    if (rc != ksfTkErrOk)
+        return rc;
 
     // Assemble MSB-first (big-endian device).
     value = ((uint32_t)buf[0] << 16) | ((uint32_t)buf[1] << 8) | (uint32_t)buf[2];
@@ -565,17 +718,17 @@ sfTkError_t sfDevINA2XX::_readRegister24(uint8_t reg, uint32_t &value)
     return ksfTkErrOk;
 }
 
-sfTkError_t sfDevINA2XX::_readRegister40(uint8_t reg, uint64_t &value)
+sfTkError_t sfDevINA2XX::readRegister40(uint8_t reg, uint64_t &value)
 {
-    if (!_theBus)
-        return ksfTkErrFail;
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
 
     uint8_t buf[5] = {0};
     size_t bytesRead = 0;
 
-    sfTkError_t result = _theBus->readRegister(reg, buf, 5, bytesRead);
-    if (result != ksfTkErrOk)
-        return result;
+    sfTkError_t rc = _theBus->readRegister(reg, buf, 5, bytesRead);
+    if (rc != ksfTkErrOk)
+        return rc;
 
     // Assemble MSB-first (big-endian device).
     value = ((uint64_t)buf[0] << 32) | ((uint64_t)buf[1] << 24) | ((uint64_t)buf[2] << 16) |
