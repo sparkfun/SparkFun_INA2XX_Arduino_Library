@@ -4,6 +4,8 @@
   This example shows how to configure the INA228 or INA237 for a user-supplied
   shunt resistor instead of the default 15 mOhm resistor on the SparkFun board.
 
+  Select the device you're using by uncommenting the matching declaration below.
+
   Use case: you have soldered a 100 mOhm shunt resistor (or any other value)
   to your circuit and need to tell the device so that current and power readings
   are computed correctly.
@@ -32,7 +34,7 @@
   produce incorrect current readings.
 
   SparkFun Electronics
-  Date: 2025
+  Date: 2026
   SparkFun code, firmware, and software is released under the MIT License.
     Please see LICENSE.md for further details.
 
@@ -65,52 +67,35 @@ const bool REDUCED_ADC_RANGE = true;
 const float MAX_CURRENT_A = 0.4f;
 // --------------------------------------------------------------------------
 
-SfeINA228ArdI2C myINA228;
-SfeINA237ArdI2C myINA237;
-
-sfDevINA2XX *myPowerMonitor = nullptr;
-bool isINA228 = false;
+// Uncomment the sensor you're using
+//SfeINA228ArdI2C myINA;
+SfeINA237ArdI2C myINA;
 
 void setup()
 {
     Serial.begin(115200);
     delay(1000);
-    Serial.println("INA2XX Example 05 - Custom Shunt Resistor (Auto-Detect)");
+    Serial.println("INA2XX Example 05 - Custom Shunt Resistor");
 
     Wire.begin();
 
-    if (myINA228.begin())
+    // begin() initializes the I2C bus and verifies the device by checking its Device ID.
+    if (!myINA.begin())
     {
-        Serial.println("INA228 detected!");
-        myPowerMonitor = &myINA228;
-        isINA228 = true;
-    }
-    else if (myINA237.begin())
-    {
-        Serial.println("INA237 detected!");
-        myPowerMonitor = &myINA237;
-        isINA228 = false;
-    }
-    else
-    {
-        Serial.println("No INA228 or INA237 found. Please check wiring. Freezing...");
+        Serial.println("Power monitor not found. Please check wiring. Freezing...");
         while (1)
             delay(1000);
     }
+    Serial.println("Power monitor detected!");
 
     // Step 1: Set the ADC range BEFORE calibrating.
     // true  = reduced range (+/-40.96 mV)  -- higher precision, lower max current
     // false = default range (+/-163.84 mV) -- lower precision, higher max current
-    if (isINA228)
-        myINA228.setADCRange(REDUCED_ADC_RANGE);
-    else
-        myINA237.setADCRange(REDUCED_ADC_RANGE);
+    myINA.setADCRange(REDUCED_ADC_RANGE);
 
     // Step 2: Calibrate with your custom shunt resistance and expected max current.
     // The library writes the correct SHUNT_CAL register value automatically.
-    sfTkError_t rc = isINA228 ? myINA228.calibrate(SHUNT_RESISTANCE_OHMS, MAX_CURRENT_A)
-                              : myINA237.calibrate(SHUNT_RESISTANCE_OHMS, MAX_CURRENT_A);
-    if (rc != ksfTkErrOk)
+    if (myINA.calibrate(SHUNT_RESISTANCE_OHMS, MAX_CURRENT_A) != ksfTkErrOk)
     {
         Serial.println("Calibration failed. Freezing...");
         while (1)
@@ -119,7 +104,7 @@ void setup()
 
     // Print the configuration so you can verify it in the serial monitor.
     uint16_t shuntCal = 0;
-    myPowerMonitor->getShuntCal(shuntCal);
+    myINA.getShuntCal(shuntCal);
 
     Serial.println();
     Serial.println("Configuration:");
@@ -141,28 +126,14 @@ void setup()
 void loop()
 {
     float busVoltage = 0.0f, shuntVoltage_mV = 0.0f, current = 0.0f, power = 0.0f;
-    sfTkError_t rc;
 
-    if (isINA228)
-    {
-        rc = myINA228.getBusVoltage_V(busVoltage);
-        if (rc == ksfTkErrOk)
-            rc = myINA228.getShuntVoltage_mV(shuntVoltage_mV);
-        if (rc == ksfTkErrOk)
-            rc = myINA228.getCurrent_A(current);
-        if (rc == ksfTkErrOk)
-            rc = myINA228.getPower_W(power);
-    }
-    else
-    {
-        rc = myINA237.getBusVoltage_V(busVoltage);
-        if (rc == ksfTkErrOk)
-            rc = myINA237.getShuntVoltage_mV(shuntVoltage_mV);
-        if (rc == ksfTkErrOk)
-            rc = myINA237.getCurrent_A(current);
-        if (rc == ksfTkErrOk)
-            rc = myINA237.getPower_W(power);
-    }
+    sfTkError_t rc = myINA.getBusVoltage_V(busVoltage);
+    if (rc == ksfTkErrOk)
+        rc = myINA.getShuntVoltage_mV(shuntVoltage_mV);
+    if (rc == ksfTkErrOk)
+        rc = myINA.getCurrent_A(current);
+    if (rc == ksfTkErrOk)
+        rc = myINA.getPower_W(power);
 
     if (rc != ksfTkErrOk)
     {
