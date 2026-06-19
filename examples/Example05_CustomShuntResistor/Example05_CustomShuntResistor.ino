@@ -82,7 +82,7 @@ void setup()
     // begin() initializes the I2C bus and verifies the device by checking its Device ID.
     if (!myINA.begin())
     {
-        Serial.println("Power monitor not found. Please check wiring. Freezing...");
+        Serial.println("Power monitor not found. Did you forget to uncomment the correct IC? Please check wiring. Freezing...");
         while (1)
             delay(1000);
     }

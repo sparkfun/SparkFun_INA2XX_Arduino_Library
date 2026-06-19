@@ -3,20 +3,14 @@
  * @brief Implementation file for the SparkFun INA2XX family base driver.
  *
  * @details
- * This file defines the sfDevINA2XX class-template member functions and explicitly instantiates
- * the template for the two type combinations the library uses: @c <int32_t, uint32_t> (INA228)
- * and @c <int16_t, uint16_t> (INA237). Because the template is explicitly instantiated here, the
- * definitions do not need to live in the header — each instantiation is compiled exactly once in
- * this translation unit, and the @c extern @c template declarations in sfDevINA2XX.h point every
- * other translation unit at these copies.
+ * This file implements the sfDevINA2XX base class methods for configuring and reading
+ * shared registers on the INA228 and INA237 power monitor ICs. Device-specific measurement
+ * methods are in sfDevINA228.cpp and sfDevINA237.cpp.
  *
  * Configuration registers (CONFIG, ADC_CONFIG, DIAG_ALRT) are accessed through bitfield unions:
  * the register word is read into the union, the relevant field is modified, and the word is
  * written back. Every method returns a SparkFun Toolkit error code so callers can detect and
  * propagate communication failures.
- *
- * Device-specific features that are not shared (the INA228 energy/charge accumulators) live in
- * sfDevINA228.cpp.
  *
  * @author SparkFun Electronics
  * @date June 2026
@@ -31,8 +25,7 @@
 
 // ========================= Setup & Identity =================================
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::begin(sfTkIBus *theBus)
+sfTkError_t sfDevINA2XX::begin(sfTkIBus *theBus)
 {
     // Adopt the supplied bus if one was provided; otherwise keep any bus set by a prior begin().
     if (theBus != nullptr)
@@ -48,26 +41,12 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::begin(sfTkIBus *theBus)
     return ksfTkErrOk;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-void sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setCommunicationBus(sfTkIBus *theBus)
+void sfDevINA2XX::setCommunicationBus(sfTkIBus *theBus)
 {
     _theBus = theBus;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-bool sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isConnected(void)
-{
-    uint16_t devID = 0;
-    if (getDeviceID(devID) != ksfTkErrOk)
-        return false;
-
-    // Match the expected device ID, or the alternate ID of a register-compatible part.
-    uint16_t maskedID = devID & kDeviceIDMask;
-    return (maskedID == _deviceID || maskedID == _deviceIDAlt);
-}
-
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getManufacturerID(uint16_t &id)
+sfTkError_t sfDevINA2XX::getManufacturerID(uint16_t &id)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -75,8 +54,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getManufacturerID(uint16_
     return _theBus->readRegister(kRegManufacturerID, id);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getDeviceID(uint16_t &id)
+sfTkError_t sfDevINA2XX::getDeviceID(uint16_t &id)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -84,8 +62,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getDeviceID(uint16_t &id)
     return _theBus->readRegister(kRegDeviceID, id);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::reset(void)
+sfTkError_t sfDevINA2XX::reset(void)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -100,8 +77,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::reset(void)
     return _theBus->writeRegister(kRegConfig, config.word);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::resetAccumulators(void)
+sfTkError_t sfDevINA2XX::resetAccumulators(void)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -118,8 +94,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::resetAccumulators(void)
 
 // ========================= CONFIG Register (0x00) ===========================
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setADCRange(bool reducedRange)
+sfTkError_t sfDevINA2XX::setADCRange(bool reducedRange)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -138,8 +113,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setADCRange(bool reducedR
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getADCRange(bool &reducedRange)
+sfTkError_t sfDevINA2XX::getADCRange(bool &reducedRange)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -153,8 +127,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getADCRange(bool &reduced
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setConversionDelay(uint8_t delay2ms)
+sfTkError_t sfDevINA2XX::setConversionDelay(uint8_t delay2ms)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -169,8 +142,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setConversionDelay(uint8_
     return _theBus->writeRegister(kRegConfig, config.word);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getConversionDelay(uint8_t &delay2ms)
+sfTkError_t sfDevINA2XX::getConversionDelay(uint8_t &delay2ms)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -181,8 +153,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getConversionDelay(uint8_
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::enableTempCompensation(bool enable)
+sfTkError_t sfDevINA2XX::enableTempCompensation(bool enable)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -197,8 +168,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::enableTempCompensation(bo
     return _theBus->writeRegister(kRegConfig, config.word);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getTempCompensation(bool &enabled)
+sfTkError_t sfDevINA2XX::getTempCompensation(bool &enabled)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -211,8 +181,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getTempCompensation(bool 
 
 // ====================== ADC_CONFIG Register (0x01) ==========================
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setADCMode(sfe_ina2xx_mode_t mode)
+sfTkError_t sfDevINA2XX::setADCMode(sfe_ina2xx_mode_t mode)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -227,8 +196,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setADCMode(sfe_ina2xx_mod
     return _theBus->writeRegister(kRegAdcConfig, adc.word);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getADCMode(sfe_ina2xx_mode_t &mode)
+sfTkError_t sfDevINA2XX::getADCMode(sfe_ina2xx_mode_t &mode)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -239,8 +207,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getADCMode(sfe_ina2xx_mod
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setBusVoltageConvTime(sfe_ina2xx_conv_time_t time)
+sfTkError_t sfDevINA2XX::setBusVoltageConvTime(sfe_ina2xx_conv_time_t time)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -255,8 +222,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setBusVoltageConvTime(sfe
     return _theBus->writeRegister(kRegAdcConfig, adc.word);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getBusVoltageConvTime(sfe_ina2xx_conv_time_t &time)
+sfTkError_t sfDevINA2XX::getBusVoltageConvTime(sfe_ina2xx_conv_time_t &time)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -267,8 +233,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getBusVoltageConvTime(sfe
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setShuntVoltageConvTime(sfe_ina2xx_conv_time_t time)
+sfTkError_t sfDevINA2XX::setShuntVoltageConvTime(sfe_ina2xx_conv_time_t time)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -283,8 +248,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setShuntVoltageConvTime(s
     return _theBus->writeRegister(kRegAdcConfig, adc.word);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getShuntVoltageConvTime(sfe_ina2xx_conv_time_t &time)
+sfTkError_t sfDevINA2XX::getShuntVoltageConvTime(sfe_ina2xx_conv_time_t &time)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -295,8 +259,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getShuntVoltageConvTime(s
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setTempConvTime(sfe_ina2xx_conv_time_t time)
+sfTkError_t sfDevINA2XX::setTempConvTime(sfe_ina2xx_conv_time_t time)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -311,8 +274,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setTempConvTime(sfe_ina2x
     return _theBus->writeRegister(kRegAdcConfig, adc.word);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getTempConvTime(sfe_ina2xx_conv_time_t &time)
+sfTkError_t sfDevINA2XX::getTempConvTime(sfe_ina2xx_conv_time_t &time)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -323,8 +285,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getTempConvTime(sfe_ina2x
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setAveragingCount(sfe_ina2xx_avg_count_t count)
+sfTkError_t sfDevINA2XX::setAveragingCount(sfe_ina2xx_avg_count_t count)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -339,8 +300,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setAveragingCount(sfe_ina
     return _theBus->writeRegister(kRegAdcConfig, adc.word);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getAveragingCount(sfe_ina2xx_avg_count_t &count)
+sfTkError_t sfDevINA2XX::getAveragingCount(sfe_ina2xx_avg_count_t &count)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -353,41 +313,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getAveragingCount(sfe_ina
 
 // ================== Calibration Registers (0x02-0x03) =======================
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::calibrate(float shuntResOhms, float maxCurrentA)
-{
-    if (_theBus == nullptr)
-        return ksfTkErrBusNotInit;
-
-    if (shuntResOhms <= 0.0f || maxCurrentA <= 0.0f)
-        return ksfTkErrFail;
-
-    _shuntRes = shuntResOhms;
-
-    // CURRENT_LSB = MaxCurrent / 2^(ADC bits - 1)  (positive half of the ADC range)
-    _currentLSB = maxCurrentA / _currentFullScale;
-
-    // SHUNT_CAL = CalScale x CURRENT_LSB x Rshunt
-    float calValue = _calScale * _currentLSB * _shuntRes;
-
-    // If ADCRANGE = 1, multiply by 4. Refresh the cached range from the device first.
-    sfTkError_t rc = getADCRange(_adcRange);
-    if (rc != ksfTkErrOk)
-        return rc;
-
-    if (_adcRange)
-        calValue *= 4.0f;
-
-    // Clamp to 15-bit range.
-    uint16_t calReg = (uint16_t)calValue;
-    if (calReg > 0x7FFF)
-        calReg = 0x7FFF;
-
-    return setShuntCal(calReg);
-}
-
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setShuntCal(uint16_t calValue)
+sfTkError_t sfDevINA2XX::setShuntCal(uint16_t calValue)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -396,8 +322,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setShuntCal(uint16_t calV
     return _theBus->writeRegister(kRegShuntCal, (uint16_t)(calValue & kShuntCalMask));
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getShuntCal(uint16_t &calValue)
+sfTkError_t sfDevINA2XX::getShuntCal(uint16_t &calValue)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -407,8 +332,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getShuntCal(uint16_t &cal
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setShuntTempCoefficient(uint16_t ppmPerDegC)
+sfTkError_t sfDevINA2XX::setShuntTempCoefficient(uint16_t ppmPerDegC)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -417,8 +341,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setShuntTempCoefficient(u
     return _theBus->writeRegister(kRegShuntTempCo, (uint16_t)(ppmPerDegC & kShuntTempCoMask));
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getShuntTempCoefficient(uint16_t &ppmPerDegC)
+sfTkError_t sfDevINA2XX::getShuntTempCoefficient(uint16_t &ppmPerDegC)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -428,171 +351,9 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getShuntTempCoefficient(u
     return rc;
 }
 
-// ================== Measurements (Engineering Units) ========================
-
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getShuntVoltage_mV(float &milliVolts)
-{
-    signed_raw_t raw = 0;
-    sfTkError_t rc = getShuntVoltageRaw(raw);
-    if (rc != ksfTkErrOk)
-        return rc;
-
-    // Select LSB based on ADC range, then convert to millivolts (LSB is in volts).
-    float lsb = _adcRange ? _shuntLSBReduced : _shuntLSBDefault;
-    milliVolts = (float)raw * lsb * 1000.0f;
-    return ksfTkErrOk;
-}
-
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getBusVoltage_V(float &volts)
-{
-    unsigned_raw_t raw = 0;
-    sfTkError_t rc = getBusVoltageRaw(raw);
-    if (rc != ksfTkErrOk)
-        return rc;
-
-    volts = (float)raw * _busLSB;
-    return ksfTkErrOk;
-}
-
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getCurrent_A(float &amps)
-{
-    signed_raw_t raw = 0;
-    sfTkError_t rc = getCurrentRaw(raw);
-    if (rc != ksfTkErrOk)
-        return rc;
-
-    amps = (float)raw * _currentLSB;
-    return ksfTkErrOk;
-}
-
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getPower_W(float &watts)
-{
-    uint32_t raw = 0;
-    sfTkError_t rc = getPowerRaw(raw);
-    if (rc != ksfTkErrOk)
-        return rc;
-
-    watts = (float)raw * _powerLSBScale * _currentLSB;
-    return ksfTkErrOk;
-}
-
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getDieTemp_C(float &celsius)
-{
-    if (_theBus == nullptr)
-        return ksfTkErrBusNotInit;
-
-    uint16_t raw = 0;
-    sfTkError_t rc = _theBus->readRegister(kRegDieTemp, raw);
-    if (rc != ksfTkErrOk)
-        return rc;
-
-    // Two's complement; the arithmetic shift discards reserved low bits (if any).
-    int16_t signedRaw = (int16_t)raw >> _tempShift;
-    celsius = (float)signedRaw * _tempLSB;
-    return ksfTkErrOk;
-}
-
-// ========================= Raw Register Access ==============================
-
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getShuntVoltageRaw(signed_raw_t &value)
-{
-    return readMeasurementSigned(kRegVShunt, value);
-}
-
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getBusVoltageRaw(unsigned_raw_t &value)
-{
-    return readMeasurementUnsigned(kRegVBus, value);
-}
-
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getCurrentRaw(signed_raw_t &value)
-{
-    return readMeasurementSigned(kRegCurrent, value);
-}
-
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getPowerRaw(uint32_t &value)
-{
-    // All 24 bits are data (unsigned) on both devices.
-    return readRegister24(kRegPower, value);
-}
-
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::readMeasurementSigned(uint8_t reg, signed_raw_t &value)
-{
-    if (_is24BitMeasurements)
-    {
-        uint32_t raw = 0;
-        sfTkError_t rc = readRegister24(reg, raw);
-        if (rc != ksfTkErrOk)
-            return rc;
-
-        // Data is in bits [23:4]; shift right by 4 to get the 20-bit value.
-        int32_t result = (int32_t)(raw >> 4);
-
-        // Sign-extend from 20 bits.
-        if (result & (1L << 19))
-            result |= ~((1L << 20) - 1);
-
-        value = (signed_raw_t)result;
-    }
-    else
-    {
-        if (_theBus == nullptr)
-            return ksfTkErrBusNotInit;
-
-        uint16_t raw = 0;
-        sfTkError_t rc = _theBus->readRegister(reg, raw);
-        if (rc != ksfTkErrOk)
-            return rc;
-
-        // 16-bit two's complement value.
-        value = (signed_raw_t)(int16_t)raw;
-    }
-
-    return ksfTkErrOk;
-}
-
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::readMeasurementUnsigned(uint8_t reg, unsigned_raw_t &value)
-{
-    if (_is24BitMeasurements)
-    {
-        uint32_t raw = 0;
-        sfTkError_t rc = readRegister24(reg, raw);
-        if (rc != ksfTkErrOk)
-            return rc;
-
-        // Data is in bits [23:4]; shift right by 4. Always positive.
-        value = (unsigned_raw_t)(raw >> 4);
-    }
-    else
-    {
-        if (_theBus == nullptr)
-            return ksfTkErrBusNotInit;
-
-        uint16_t raw = 0;
-        sfTkError_t rc = _theBus->readRegister(reg, raw);
-        if (rc != ksfTkErrOk)
-            return rc;
-
-        value = (unsigned_raw_t)raw;
-    }
-
-    return ksfTkErrOk;
-}
-
 // ================== Diagnostics & Alert (0x0B) ==============================
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getDiagnosticFlags(sfe_ina2xx_diag_alrt_reg_t &flags)
+sfTkError_t sfDevINA2XX::getDiagnosticFlags(sfe_ina2xx_diag_alrt_reg_t &flags)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -600,8 +361,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getDiagnosticFlags(sfe_in
     return _theBus->readRegister(kRegDiagAlrt, flags.word);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setAlertLatch(bool latched)
+sfTkError_t sfDevINA2XX::setAlertLatch(bool latched)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -616,8 +376,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setAlertLatch(bool latche
     return _theBus->writeRegister(kRegDiagAlrt, diag.word);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getAlertLatch(bool &latched)
+sfTkError_t sfDevINA2XX::getAlertLatch(bool &latched)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -628,8 +387,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getAlertLatch(bool &latch
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setConversionReadyAlert(bool enable)
+sfTkError_t sfDevINA2XX::setConversionReadyAlert(bool enable)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -644,8 +402,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setConversionReadyAlert(b
     return _theBus->writeRegister(kRegDiagAlrt, diag.word);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getConversionReadyAlert(bool &enabled)
+sfTkError_t sfDevINA2XX::getConversionReadyAlert(bool &enabled)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -656,8 +413,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getConversionReadyAlert(b
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setSlowAlert(bool enable)
+sfTkError_t sfDevINA2XX::setSlowAlert(bool enable)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -672,8 +428,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setSlowAlert(bool enable)
     return _theBus->writeRegister(kRegDiagAlrt, diag.word);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getSlowAlert(bool &enabled)
+sfTkError_t sfDevINA2XX::getSlowAlert(bool &enabled)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -684,8 +439,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getSlowAlert(bool &enable
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setAlertPolarity(bool activeHigh)
+sfTkError_t sfDevINA2XX::setAlertPolarity(bool activeHigh)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -700,8 +454,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setAlertPolarity(bool act
     return _theBus->writeRegister(kRegDiagAlrt, diag.word);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getAlertPolarity(bool &activeHigh)
+sfTkError_t sfDevINA2XX::getAlertPolarity(bool &activeHigh)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -712,8 +465,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getAlertPolarity(bool &ac
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isEnergyOverflow(bool &overflow)
+sfTkError_t sfDevINA2XX::isEnergyOverflow(bool &overflow)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -724,8 +476,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isEnergyOverflow(bool &ov
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isChargeOverflow(bool &overflow)
+sfTkError_t sfDevINA2XX::isChargeOverflow(bool &overflow)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -736,8 +487,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isChargeOverflow(bool &ov
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isMathOverflow(bool &overflow)
+sfTkError_t sfDevINA2XX::isMathOverflow(bool &overflow)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -748,8 +498,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isMathOverflow(bool &over
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isTempOverLimit(bool &overLimit)
+sfTkError_t sfDevINA2XX::isTempOverLimit(bool &overLimit)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -760,8 +509,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isTempOverLimit(bool &ove
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isShuntOverVoltage(bool &overVoltage)
+sfTkError_t sfDevINA2XX::isShuntOverVoltage(bool &overVoltage)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -772,8 +520,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isShuntOverVoltage(bool &
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isShuntUnderVoltage(bool &underVoltage)
+sfTkError_t sfDevINA2XX::isShuntUnderVoltage(bool &underVoltage)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -784,8 +531,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isShuntUnderVoltage(bool 
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isBusOverVoltage(bool &overVoltage)
+sfTkError_t sfDevINA2XX::isBusOverVoltage(bool &overVoltage)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -796,8 +542,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isBusOverVoltage(bool &ov
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isBusUnderVoltage(bool &underVoltage)
+sfTkError_t sfDevINA2XX::isBusUnderVoltage(bool &underVoltage)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -808,8 +553,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isBusUnderVoltage(bool &u
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isPowerOverLimit(bool &overLimit)
+sfTkError_t sfDevINA2XX::isPowerOverLimit(bool &overLimit)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -820,8 +564,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isPowerOverLimit(bool &ov
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isConversionReady(bool &ready)
+sfTkError_t sfDevINA2XX::isConversionReady(bool &ready)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -832,8 +575,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isConversionReady(bool &r
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isMemoryValid(bool &valid)
+sfTkError_t sfDevINA2XX::isMemoryValid(bool &valid)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -846,8 +588,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::isMemoryValid(bool &valid
 
 // ==================== Threshold Registers (0x0C-0x11) =======================
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setShuntOverVoltageThreshold(int16_t threshold)
+sfTkError_t sfDevINA2XX::setShuntOverVoltageThreshold(int16_t threshold)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -855,31 +596,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setShuntOverVoltageThresh
     return _theBus->writeRegister(kRegSOVL, (uint16_t)threshold);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setShuntOverVoltageThreshold_mV(float milliVolts)
-{
-    if (_theBus == nullptr)
-        return ksfTkErrBusNotInit;
-
-    // The SOVL LSB depends on ADCRANGE; refresh the cached range from the device.
-    sfTkError_t rc = getADCRange(_adcRange);
-    if (rc != ksfTkErrOk)
-        return rc;
-
-    float lsb = _adcRange ? kShuntThresholdLSBReduced_mV : kShuntThresholdLSBDefault_mV;
-    float counts = milliVolts / lsb;
-
-    // Clamp to the signed 16-bit register range.
-    if (counts > 32767.0f)
-        counts = 32767.0f;
-    else if (counts < -32768.0f)
-        counts = -32768.0f;
-
-    return setShuntOverVoltageThreshold((int16_t)counts);
-}
-
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getShuntOverVoltageThreshold(int16_t &threshold)
+sfTkError_t sfDevINA2XX::getShuntOverVoltageThreshold(int16_t &threshold)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -890,8 +607,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getShuntOverVoltageThresh
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setShuntUnderVoltageThreshold(int16_t threshold)
+sfTkError_t sfDevINA2XX::setShuntUnderVoltageThreshold(int16_t threshold)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -899,8 +615,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setShuntUnderVoltageThres
     return _theBus->writeRegister(kRegSUVL, (uint16_t)threshold);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getShuntUnderVoltageThreshold(int16_t &threshold)
+sfTkError_t sfDevINA2XX::getShuntUnderVoltageThreshold(int16_t &threshold)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -911,8 +626,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getShuntUnderVoltageThres
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setBusOverVoltageThreshold(uint16_t threshold)
+sfTkError_t sfDevINA2XX::setBusOverVoltageThreshold(uint16_t threshold)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -921,22 +635,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setBusOverVoltageThreshol
     return _theBus->writeRegister(kRegBOVL, (uint16_t)(threshold & kBusThresholdMask));
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setBusOverVoltageThreshold_mV(float milliVolts)
-{
-    float counts = milliVolts / kBusThresholdLSB_mV;
-
-    // Clamp to the unsigned 15-bit register range.
-    if (counts < 0.0f)
-        counts = 0.0f;
-    else if (counts > 32767.0f)
-        counts = 32767.0f;
-
-    return setBusOverVoltageThreshold((uint16_t)counts);
-}
-
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getBusOverVoltageThreshold(uint16_t &threshold)
+sfTkError_t sfDevINA2XX::getBusOverVoltageThreshold(uint16_t &threshold)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -946,8 +645,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getBusOverVoltageThreshol
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setBusUnderVoltageThreshold(uint16_t threshold)
+sfTkError_t sfDevINA2XX::setBusUnderVoltageThreshold(uint16_t threshold)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -955,8 +653,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setBusUnderVoltageThresho
     return _theBus->writeRegister(kRegBUVL, (uint16_t)(threshold & kBusThresholdMask));
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getBusUnderVoltageThreshold(uint16_t &threshold)
+sfTkError_t sfDevINA2XX::getBusUnderVoltageThreshold(uint16_t &threshold)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -966,8 +663,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getBusUnderVoltageThresho
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setTempLimitThreshold(int16_t threshold)
+sfTkError_t sfDevINA2XX::setTempLimitThreshold(int16_t threshold)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -975,8 +671,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setTempLimitThreshold(int
     return _theBus->writeRegister(kRegTempLimit, (uint16_t)threshold);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getTempLimitThreshold(int16_t &threshold)
+sfTkError_t sfDevINA2XX::getTempLimitThreshold(int16_t &threshold)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -987,8 +682,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getTempLimitThreshold(int
     return rc;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setPowerLimitThreshold(uint16_t threshold)
+sfTkError_t sfDevINA2XX::setPowerLimitThreshold(uint16_t threshold)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -996,8 +690,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::setPowerLimitThreshold(ui
     return _theBus->writeRegister(kRegPowerLimit, threshold);
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getPowerLimitThreshold(uint16_t &threshold)
+sfTkError_t sfDevINA2XX::getPowerLimitThreshold(uint16_t &threshold)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -1007,8 +700,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::getPowerLimitThreshold(ui
 
 // ========================= Protected Helpers ================================
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::readRegister24(uint8_t reg, uint32_t &value)
+sfTkError_t sfDevINA2XX::readRegister24(uint8_t reg, uint32_t &value)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -1026,8 +718,7 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::readRegister24(uint8_t re
     return ksfTkErrOk;
 }
 
-template <typename signed_raw_t, typename unsigned_raw_t>
-sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::readRegister40(uint8_t reg, uint64_t &value)
+sfTkError_t sfDevINA2XX::readRegister40(uint8_t reg, uint64_t &value)
 {
     if (_theBus == nullptr)
         return ksfTkErrBusNotInit;
@@ -1046,11 +737,76 @@ sfTkError_t sfDevINA2XX<signed_raw_t, unsigned_raw_t>::readRegister40(uint8_t re
     return ksfTkErrOk;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// Explicit template instantiations
-///////////////////////////////////////////////////////////////////////////////
-// Generate the two concrete classes the library uses. These provide the symbols that the
-// extern template declarations in sfDevINA2XX.h reference. Add a line here (and a matching
-// extern declaration in the header) to support an additional device.
-template class sfDevINA2XX<int32_t, uint32_t>; // INA228 (20-bit values in 32-bit words)
-template class sfDevINA2XX<int16_t, uint16_t>; // INA237 (plain 16-bit values)
+// ===================== Shared Measurement Helpers ===========================
+// These bodies are identical for the INA228 and INA237 aside from the constants/shift the device
+// passes in. The width/type-dependent helpers are templated inline in the header; the ones below
+// vary only by runtime constants, so they live here.
+
+sfTkError_t sfDevINA2XX::calibrateImpl(float shuntResOhms, float maxCurrentA, float calScale,
+                                       float currentFullScale)
+{
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    if (shuntResOhms <= 0.0f || maxCurrentA <= 0.0f)
+        return ksfTkErrFail;
+
+    _shuntRes = shuntResOhms;
+
+    // CURRENT_LSB = MaxCurrent / full-scale count (positive half of the ADC range).
+    _currentLSB = maxCurrentA / currentFullScale;
+
+    // SHUNT_CAL = calScale * CURRENT_LSB * Rshunt
+    float calValue = calScale * _currentLSB * _shuntRes;
+
+    // If ADCRANGE = 1, multiply by 4. Refresh the cached range from the device first.
+    sfTkError_t rc = getADCRange(_adcRange);
+    if (rc != ksfTkErrOk)
+        return rc;
+
+    if (_adcRange)
+        calValue *= 4.0f;
+
+    // Clamp to 15-bit range.
+    uint16_t calReg = (uint16_t)calValue;
+    if (calReg > 0x7FFF)
+        calReg = 0x7FFF;
+
+    return setShuntCal(calReg);
+}
+
+sfTkError_t sfDevINA2XX::powerToWatts(float &watts, float powerLSBScale)
+{
+    uint32_t raw = 0;
+    sfTkError_t rc = readPowerRaw(raw);
+    if (rc != ksfTkErrOk)
+        return rc;
+
+    // Power LSB = powerLSBScale x CURRENT_LSB.
+    watts = (float)raw * powerLSBScale * _currentLSB;
+    return ksfTkErrOk;
+}
+
+sfTkError_t sfDevINA2XX::dieTemperatureToCelsius(float &celsius, uint8_t shift, float tempLSB)
+{
+    if (_theBus == nullptr)
+        return ksfTkErrBusNotInit;
+
+    uint16_t raw = 0;
+    sfTkError_t rc = _theBus->readRegister(kRegDieTemp, raw);
+    if (rc != ksfTkErrOk)
+        return rc;
+
+    // Interpret as a 16-bit two's complement value, then arithmetic-shift to drop any reserved
+    // low bits for devices that store the temperature in the upper bits (INA237 uses bits [15:4]).
+    int16_t signedRaw = (int16_t)((int16_t)raw >> shift);
+
+    celsius = (float)signedRaw * tempLSB;
+    return ksfTkErrOk;
+}
+
+sfTkError_t sfDevINA2XX::readPowerRaw(uint32_t &value)
+{
+    // POWER is a 24-bit unsigned register on both devices.
+    return readRegister24(kRegPower, value);
+}

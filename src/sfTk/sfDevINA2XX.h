@@ -4,18 +4,8 @@
  *
  * @details
  * sfDevINA2XX is the platform-independent base class for the Texas Instruments INA228 and INA237
- * digital power/energy monitor ICs. It is a class template parameterized by the two raw register
- * types that differ between the devices:
- *
- *   - @c signed_raw_t   — type returned by raw shunt-voltage and current reads (signed).
- *   - @c unsigned_raw_t — type returned by raw bus-voltage reads (unsigned).
- *
- * The INA228 instantiates the template with @c <int32_t, uint32_t> (20-bit values held in 32-bit
- * words); the INA237 with @c <int16_t, uint16_t> (plain 16-bit values). See sfDevINA228.h and
- * sfDevINA237.h.
- *
- * The class provides register access for all configuration and diagnostic registers shared
- * between both devices:
+ * digital power/energy monitor ICs. It provides register access for all configuration and
+ * diagnostic registers that are shared between both devices:
  *
  *   - CONFIG (0x00)         — system reset, ADC range, conversion delay, temp compensation
  *   - ADC_CONFIG (0x01)     — operating mode, conversion times, averaging
@@ -29,22 +19,11 @@
  *   - PWR_LIMIT (0x11)      — power over-limit threshold
  *   - MANUFACTURER_ID (0x3E) / DEVICE_ID (0x3F)
  *
- * It also implements calibration, the engineering-unit measurement reads (VSHUNT, VBUS, CURRENT,
- * POWER, DIETEMP), and the device-identity check (isConnected). These differ between the two ICs
- * only in register width, LSB scaling, and expected DEVICE_ID; the width is selected by the
- * template types plus the @c is24BitMeasurements flag, and the scaling values and device IDs are
- * supplied by the derived device class through the constructor. INA228-only features (ENERGY,
- * CHARGE) live in the derived sfDevINA228 class.
+ * Device-specific measurement registers (VSHUNT, VBUS, CURRENT, POWER, ENERGY, CHARGE) are
+ * implemented in the derived sfDevINA228 and sfDevINA237 classes because they differ in
+ * register width and LSB scaling between the two ICs.
  *
  * Both devices use 8-bit register addresses and big-endian byte order over I2C.
- *
- * The class is a template, but its member functions are *not* defined inline in this header.
- * They are defined out-of-line in sfDevINA2XX.cpp and explicitly instantiated there for the two
- * type combinations the library uses. The @c extern @c template declarations at the bottom of
- * this header tell every other translation unit to use those instantiations rather than generate
- * its own, so the template still compiles exactly once. Adding a new device means adding its
- * @c <signed, unsigned> pair to both the @c extern declarations here and the explicit
- * instantiations in the .cpp.
  *
  * Most methods return a SparkFun Toolkit error code (::ksfTkErrOk on success, a negative value on
  * error); values read from the device are returned through reference (output) parameters. Callers
@@ -196,48 +175,20 @@ union sfe_ina2xx_diag_alrt_reg_t
 
 /// @brief Platform-independent base driver for the INA228/INA237 power monitor ICs.
 ///
-/// @details This class template implements register-level access for all configuration and
-/// diagnostic registers shared between the INA228 and INA237, plus calibration, the
-/// engineering-unit measurement reads, and the device-identity check. It is parameterized by the
-/// two raw register types that differ between the devices, and the per-device LSB scaling values
-/// and expected DEVICE_ID(s) are supplied by the derived class through the constructor.
-///
-/// @tparam signed_raw_t   Type returned by raw shunt-voltage and current reads (e.g., int32_t).
-/// @tparam unsigned_raw_t Type returned by raw bus-voltage reads (e.g., uint32_t).
+/// @details This class implements register-level access for all configuration and diagnostic
+/// registers shared between the INA228 and INA237. Measurement registers (VSHUNT, VBUS,
+/// CURRENT, POWER, ENERGY, CHARGE) are implemented in the derived sfDevINA228 and sfDevINA237
+/// classes because they differ in register width and scaling.
 ///
 /// Most methods return a SparkFun Toolkit error code (::ksfTkErrOk on success, a negative value
 /// on error); values read from the device are returned through reference (output) parameters.
 ///
-/// The member functions are defined and explicitly instantiated in sfDevINA2XX.cpp; see the file
-/// header for details. This class does not depend on Arduino. The Arduino-specific wrappers
-/// (SfeINA228ArdI2C, SfeINA237ArdI2C) provide begin() methods.
-template <typename signed_raw_t, typename unsigned_raw_t>
+/// This class does not depend on Arduino. The Arduino-specific wrappers (SfeINA228ArdI2C,
+/// SfeINA237ArdI2C) provide begin() and isConnected() methods.
 class sfDevINA2XX
 {
   public:
-    /// @brief Construct the base driver with the device-specific scaling and identity configuration.
-    /// @param is24BitMeasurements True if VSHUNT/VBUS/CURRENT are 24-bit registers with data in
-    /// bits [23:4] (INA228); false for plain 16-bit registers (INA237).
-    /// @param tempShift Right-shift applied to the raw DIETEMP word (0 on the INA228, 4 on the
-    /// INA237 where data is in bits [15:4]).
-    /// @param calScale Calibration scale constant used to compute SHUNT_CAL.
-    /// @param shuntLSBDefault Shunt voltage LSB in volts at the default ADC range (ADCRANGE = 0).
-    /// @param shuntLSBReduced Shunt voltage LSB in volts at the reduced ADC range (ADCRANGE = 1).
-    /// @param busLSB Bus voltage LSB in volts.
-    /// @param tempLSB Die temperature LSB in deg-C.
-    /// @param currentFullScale Positive half of the ADC range, used to derive CURRENT_LSB.
-    /// @param powerLSBScale Power LSB scale factor (Power LSB = powerLSBScale x CURRENT_LSB).
-    /// @param deviceID Expected DEVICE_ID (upper 12 bits) for the identity check.
-    /// @param deviceIDAlt Alternate accepted DEVICE_ID for a register-compatible part; pass the
-    /// same value as @p deviceID if the device has no compatible alternate.
-    sfDevINA2XX(bool is24BitMeasurements, uint8_t tempShift, float calScale, float shuntLSBDefault,
-                float shuntLSBReduced, float busLSB, float tempLSB, float currentFullScale,
-                float powerLSBScale, uint16_t deviceID, uint16_t deviceIDAlt)
-        : _theBus{nullptr}, _currentLSB{0.0f}, _adcRange{false}, _shuntRes{0.0f},
-          _is24BitMeasurements{is24BitMeasurements}, _tempShift{tempShift}, _calScale{calScale},
-          _shuntLSBDefault{shuntLSBDefault}, _shuntLSBReduced{shuntLSBReduced}, _busLSB{busLSB},
-          _tempLSB{tempLSB}, _currentFullScale{currentFullScale}, _powerLSBScale{powerLSBScale},
-          _deviceID{deviceID}, _deviceIDAlt{deviceIDAlt}
+    sfDevINA2XX() : _theBus{nullptr}, _currentLSB{0.0f}, _adcRange{false}, _shuntRes{0.0f}
     {
     }
 
@@ -252,12 +203,6 @@ class sfDevINA2XX
     void setCommunicationBus(sfTkIBus *theBus);
 
     // ========================= Identity & Reset =============================
-
-    /// @brief Check if the device is connected and responding.
-    /// @details Reads the DEVICE_ID register and checks that the upper 12 bits match the expected
-    /// device ID (or the alternate register-compatible ID) supplied at construction.
-    /// @return true if the device responds and the identity check passes; false otherwise.
-    bool isConnected(void);
 
     /// @brief Read the Manufacturer ID register (0x3E).
     /// @param id Output reference that receives the manufacturer ID (0x5449 = "TI").
@@ -363,16 +308,6 @@ class sfDevINA2XX
 
     // ================== Calibration Registers (0x02-0x03) ===================
 
-    /// @brief Calibrate the device for current and power measurements.
-    /// @details Computes CURRENT_LSB from maxCurrent and the device ADC range, then
-    /// calculates SHUNT_CAL = calScale * CURRENT_LSB * Rshunt (x4 if ADCRANGE=1).
-    /// Stores _currentLSB and _shuntRes internally for engineering-unit conversions.
-    /// @param shuntResOhms Shunt resistance in Ohms (e.g., 0.015 for 15 mOhm).
-    /// @param maxCurrentA Maximum expected current in Amps.
-    /// @return ::ksfTkErrOk on success, ::ksfTkErrFail for invalid arguments, or an error code on
-    /// communication failure.
-    sfTkError_t calibrate(float shuntResOhms, float maxCurrentA);
-
     /// @brief Write a raw value to the SHUNT_CAL register.
     /// @param calValue 15-bit calibration value (bit 15 is reserved).
     /// @return ::ksfTkErrOk on success, or an error code on failure.
@@ -392,67 +327,6 @@ class sfDevINA2XX
     /// @param ppmPerDegC Output reference that receives the temperature coefficient in ppm/deg-C.
     /// @return ::ksfTkErrOk on success, or an error code on failure.
     sfTkError_t getShuntTempCoefficient(uint16_t &ppmPerDegC);
-
-    // ================== Measurements (Engineering Units) ====================
-
-    /// @brief Read the shunt voltage in millivolts.
-    /// @details Reads the VSHUNT register and scales by the device shunt LSB
-    /// (selected by the current ADCRANGE setting).
-    /// @param milliVolts Output reference that receives the shunt voltage in mV.
-    /// @return ::ksfTkErrOk on success, or an error code on failure.
-    sfTkError_t getShuntVoltage_mV(float &milliVolts);
-
-    /// @brief Read the bus voltage in Volts.
-    /// @details Reads the VBUS register and scales by the device bus voltage LSB.
-    /// @param volts Output reference that receives the bus voltage in V.
-    /// @return ::ksfTkErrOk on success, or an error code on failure.
-    sfTkError_t getBusVoltage_V(float &volts);
-
-    /// @brief Read the calculated current in Amps.
-    /// @details Reads the CURRENT register (two's complement) and scales by
-    /// CURRENT_LSB (set during calibrate()).
-    /// @note calibrate() must be called before this method returns meaningful values.
-    /// @param amps Output reference that receives the current in A.
-    /// @return ::ksfTkErrOk on success, or an error code on failure.
-    sfTkError_t getCurrent_A(float &amps);
-
-    /// @brief Read the calculated power in Watts.
-    /// @details Reads the 24-bit POWER register (unsigned) and scales by the device
-    /// power LSB scale x CURRENT_LSB (set during calibrate()).
-    /// @note calibrate() must be called before this method returns meaningful values.
-    /// @param watts Output reference that receives the power in W.
-    /// @return ::ksfTkErrOk on success, or an error code on failure.
-    sfTkError_t getPower_W(float &watts);
-
-    /// @brief Read the die temperature in degrees Celsius.
-    /// @details Reads the 16-bit DIETEMP register (two's complement) and scales by the
-    /// device temperature LSB. On devices where the data occupies only the upper bits
-    /// (INA237: bits [15:4]), the reserved low bits are shifted out first.
-    /// @param celsius Output reference that receives the temperature in deg-C.
-    /// @return ::ksfTkErrOk on success, or an error code on failure.
-    sfTkError_t getDieTemp_C(float &celsius);
-
-    // ========================= Raw Register Access ===========================
-
-    /// @brief Read the raw shunt voltage value.
-    /// @param value Output reference that receives the signed raw value.
-    /// @return ::ksfTkErrOk on success, or an error code on failure.
-    sfTkError_t getShuntVoltageRaw(signed_raw_t &value);
-
-    /// @brief Read the raw bus voltage value.
-    /// @param value Output reference that receives the unsigned raw value.
-    /// @return ::ksfTkErrOk on success, or an error code on failure.
-    sfTkError_t getBusVoltageRaw(unsigned_raw_t &value);
-
-    /// @brief Read the raw current value.
-    /// @param value Output reference that receives the signed raw value.
-    /// @return ::ksfTkErrOk on success, or an error code on failure.
-    sfTkError_t getCurrentRaw(signed_raw_t &value);
-
-    /// @brief Read the raw 24-bit power value.
-    /// @param value Output reference that receives the unsigned 24-bit value.
-    /// @return ::ksfTkErrOk on success, or an error code on failure.
-    sfTkError_t getPowerRaw(uint32_t &value);
 
     // ================== Diagnostics & Alert (0x0B) ==========================
 
@@ -564,15 +438,6 @@ class sfDevINA2XX
     /// @return ::ksfTkErrOk on success, or an error code on failure.
     sfTkError_t setShuntOverVoltageThreshold(int16_t threshold);
 
-    /// @brief Set the shunt overvoltage threshold in millivolts.
-    /// @details Converts millivolts to the SOVL register value using the threshold LSB
-    /// (5 uV at the default ADC range, 1.25 uV at the reduced range). The current ADCRANGE
-    /// setting is read from the device, so call setADCRange() before this method.
-    /// Values beyond the register range are clamped.
-    /// @param milliVolts Threshold in mV. Max +/-163.84 mV (default range) or +/-40.96 mV (reduced).
-    /// @return ::ksfTkErrOk on success, or an error code on failure.
-    sfTkError_t setShuntOverVoltageThreshold_mV(float milliVolts);
-
     /// @brief Get the shunt overvoltage threshold.
     /// @param threshold Output reference that receives the threshold value.
     /// @return ::ksfTkErrOk on success, or an error code on failure.
@@ -592,13 +457,6 @@ class sfDevINA2XX
     /// @param threshold Unsigned 15-bit value. LSB = 3.125mV.
     /// @return ::ksfTkErrOk on success, or an error code on failure.
     sfTkError_t setBusOverVoltageThreshold(uint16_t threshold);
-
-    /// @brief Set the bus overvoltage threshold in millivolts.
-    /// @details Converts millivolts to the BOVL register value (LSB = 3.125 mV).
-    /// Values beyond the register range (0 to ~102.4 V) are clamped.
-    /// @param milliVolts Threshold in mV (e.g., 14000.0 for 14 V).
-    /// @return ::ksfTkErrOk on success, or an error code on failure.
-    sfTkError_t setBusOverVoltageThreshold_mV(float milliVolts);
 
     /// @brief Get the bus overvoltage threshold.
     /// @param threshold Output reference that receives the threshold value.
@@ -641,19 +499,6 @@ class sfDevINA2XX
     bool _adcRange;    ///< Cached ADC range: false = +/-163.84mV, true = +/-40.96mV.
     float _shuntRes;   ///< Shunt resistance in Ohms, stored during calibration.
 
-    // --- Per-device scaling and identity configuration, supplied by the derived class constructor ---
-    bool _is24BitMeasurements; ///< True if VSHUNT/VBUS/CURRENT are 24-bit registers (data in [23:4]).
-    uint8_t _tempShift;        ///< Right-shift applied to the raw DIETEMP word.
-    float _calScale;           ///< Calibration scale constant.
-    float _shuntLSBDefault;    ///< Shunt LSB in volts (ADCRANGE = 0).
-    float _shuntLSBReduced;    ///< Shunt LSB in volts (ADCRANGE = 1).
-    float _busLSB;             ///< Bus voltage LSB in volts.
-    float _tempLSB;            ///< Die temperature LSB in deg-C.
-    float _currentFullScale;   ///< Positive half of the ADC range, used to derive CURRENT_LSB.
-    float _powerLSBScale;      ///< Power LSB = _powerLSBScale x CURRENT_LSB.
-    uint16_t _deviceID;        ///< Expected DEVICE_ID (upper 12 bits) for the identity check.
-    uint16_t _deviceIDAlt;     ///< Alternate accepted DEVICE_ID (register-compatible part).
-
     /// @brief Read 3 bytes (24-bit) from a register into a uint32_t.
     /// @param reg Register address.
     /// @param value Output value (MSB-first assembly).
@@ -665,6 +510,129 @@ class sfDevINA2XX
     /// @param value Output value (MSB-first assembly).
     /// @return ::ksfTkErrOk on success, or an error code on failure.
     sfTkError_t readRegister40(uint8_t reg, uint64_t &value);
+
+    // ===================== Shared Measurement Helpers =======================
+    // The INA228 and INA237 share these measurement bodies. Each helper is templated (or
+    // parameterized) only on what actually differs for that one operation, so the per-device
+    // classes stay thin forwarders that pass their own types and constants. No single bundled
+    // "traits" object is required.
+
+    /// @brief Shared calibration math; only the two scale constants differ per device.
+    /// @param calScale Device calibration scale (13107.2e6 for INA228, 819.2e6 for INA237).
+    /// @param currentFullScale Positive half of the ADC range (2^19 for INA228, 2^15 for INA237).
+    sfTkError_t calibrateImpl(float shuntResOhms, float maxCurrentA, float calScale,
+                              float currentFullScale);
+
+    /// @brief Shared POWER -> watts conversion. @p powerLSBScale is 3.2 (INA228) or 0.2 (INA237).
+    sfTkError_t powerToWatts(float &watts, float powerLSBScale);
+
+    /// @brief Shared DIETEMP -> Celsius conversion.
+    /// @param shift Right-shift before sign interpretation: 0 (INA228, 16-bit) or 4 (INA237, 12-bit).
+    sfTkError_t dieTemperatureToCelsius(float &celsius, uint8_t shift, float tempLSB);
+
+    /// @brief Shared raw POWER read (24-bit, unsigned) — identical on both devices.
+    sfTkError_t readPowerRaw(uint32_t &value);
+
+    /// @brief Shared raw read for a signed measurement register (shunt voltage, current).
+    /// @tparam T    Output integer type (int32_t for the 24-bit INA228, int16_t for INA237).
+    /// @tparam Wide true = 24-bit register, data in bits [23:4], 20-bit sign extension (INA228);
+    ///              false = 16-bit two's complement read directly (INA237).
+    template <typename T, bool Wide>
+    sfTkError_t readSignedMeasurementRaw(uint8_t reg, T &value)
+    {
+        if (_theBus == nullptr)
+            return ksfTkErrBusNotInit;
+
+        if (Wide)
+        {
+            uint32_t raw = 0;
+            sfTkError_t rc = readRegister24(reg, raw);
+            if (rc != ksfTkErrOk)
+                return rc;
+
+            int32_t result = (int32_t)(raw >> 4);
+            if (result & (1L << 19))
+                result |= ~((1L << 20) - 1);
+
+            value = (T)result;
+            return ksfTkErrOk;
+        }
+        else
+        {
+            uint16_t raw = 0;
+            sfTkError_t rc = _theBus->readRegister(reg, raw);
+            value = (T)(int16_t)raw;
+            return rc;
+        }
+    }
+
+    /// @brief Shared raw read for an unsigned measurement register (bus voltage).
+    /// @tparam T    Output integer type (uint32_t for INA228, uint16_t for INA237).
+    /// @tparam Wide true = 24-bit register, data in bits [23:4] (INA228); false = 16-bit read (INA237).
+    template <typename T, bool Wide>
+    sfTkError_t readUnsignedMeasurementRaw(uint8_t reg, T &value)
+    {
+        if (_theBus == nullptr)
+            return ksfTkErrBusNotInit;
+
+        if (Wide)
+        {
+            uint32_t raw = 0;
+            sfTkError_t rc = readRegister24(reg, raw);
+            if (rc != ksfTkErrOk)
+                return rc;
+
+            value = (T)(raw >> 4);
+            return ksfTkErrOk;
+        }
+        else
+        {
+            uint16_t raw = 0;
+            sfTkError_t rc = _theBus->readRegister(reg, raw);
+            value = (T)raw;
+            return rc;
+        }
+    }
+
+    /// @brief Shared VSHUNT -> millivolts conversion (reads raw, then scales by the range LSB).
+    template <typename T, bool Wide>
+    sfTkError_t shuntVoltageToMilliVolts(float &milliVolts, float lsbDefault, float lsbReduced)
+    {
+        T raw = 0;
+        sfTkError_t rc = readSignedMeasurementRaw<T, Wide>(kRegVShunt, raw);
+        if (rc != ksfTkErrOk)
+            return rc;
+
+        float lsb = _adcRange ? lsbReduced : lsbDefault;
+        milliVolts = (float)raw * lsb * 1000.0f;
+        return ksfTkErrOk;
+    }
+
+    /// @brief Shared VBUS -> volts conversion.
+    template <typename T, bool Wide>
+    sfTkError_t busVoltageToVolts(float &volts, float busLSB)
+    {
+        T raw = 0;
+        sfTkError_t rc = readUnsignedMeasurementRaw<T, Wide>(kRegVBus, raw);
+        if (rc != ksfTkErrOk)
+            return rc;
+
+        volts = (float)raw * busLSB;
+        return ksfTkErrOk;
+    }
+
+    /// @brief Shared CURRENT -> amps conversion (scales by the calibrated CURRENT_LSB).
+    template <typename T, bool Wide>
+    sfTkError_t currentToAmps(float &amps)
+    {
+        T raw = 0;
+        sfTkError_t rc = readSignedMeasurementRaw<T, Wide>(kRegCurrent, raw);
+        if (rc != ksfTkErrOk)
+            return rc;
+
+        amps = (float)raw * _currentLSB;
+        return ksfTkErrOk;
+    }
 
     ///////////////////////////////////////////////////////////////////////////
     // I2C Addressing
@@ -699,29 +667,12 @@ class sfDevINA2XX
     static const uint16_t kShuntCalMask = 0x7FFF;     ///< SHUNT_CAL valid bits [14:0] (bit 15 reserved)
     static const uint16_t kBusThresholdMask = 0x7FFF; ///< BOVL/BUVL valid bits [14:0] (bit 15 reserved)
     static const uint16_t kShuntTempCoMask = 0x3FFF;  ///< TEMPCO field mask, bits [13:0]
-    static const uint16_t kDeviceIDMask = 0xFFF0;     ///< DEVICE_ID mask (ignore revision nibble)
 
-    // Threshold register LSBs (shared between INA228 and INA237)
-    static constexpr float kBusThresholdLSB_mV = 3.125f;        ///< BOVL/BUVL LSB in millivolts.
-    static constexpr float kShuntThresholdLSBDefault_mV = 5.0e-3f;    ///< SOVL/SUVL LSB in mV (ADCRANGE = 0).
-    static constexpr float kShuntThresholdLSBReduced_mV = 1.25e-3f;   ///< SOVL/SUVL LSB in mV (ADCRANGE = 1).
-
-    // Identity constant (shared between INA228 and INA237)
+    // Device ID Constants
+    static const uint16_t kINA228DeviceIDValue = 0x2280;  ///< INA228 device ID (upper 12 bits)
+    static const uint16_t kINA237DeviceIDValue = 0x2370;  ///< INA237 device ID (upper 12 bits)
+    static const uint16_t kINA238DeviceIDValue = 0x2380;  ///< INA238 device ID (register-compatible with INA237)
+    static const uint16_t kDeviceIDMask = 0xFFF0;         ///< Mask for device ID (ignore revision)
     static const uint16_t kManufacturerIDValue = 0x5449;  ///< "TI" in ASCII
-
-  private:
-    /// @brief Read a signed measurement register (VSHUNT or CURRENT) per the device layout.
-    sfTkError_t readMeasurementSigned(uint8_t reg, signed_raw_t &value);
-
-    /// @brief Read an unsigned measurement register (VBUS) per the device layout.
-    sfTkError_t readMeasurementUnsigned(uint8_t reg, unsigned_raw_t &value);
 };
 
-///////////////////////////////////////////////////////////////////////////////
-// Explicit instantiation declarations
-///////////////////////////////////////////////////////////////////////////////
-// The member functions are defined and explicitly instantiated in sfDevINA2XX.cpp for the two
-// type combinations below. These declarations stop every other translation unit from generating
-// its own copy. Add a new device's <signed, unsigned> pair here and in the .cpp to support it.
-extern template class sfDevINA2XX<int32_t, uint32_t>; ///< INA228 (20-bit values in 32-bit words)
-extern template class sfDevINA2XX<int16_t, uint16_t>; ///< INA237 (plain 16-bit values)
