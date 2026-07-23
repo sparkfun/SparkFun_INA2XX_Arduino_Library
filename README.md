@@ -1,4 +1,4 @@
-![SparkFun INA2XX Arduino Library](docs/images/gh-banner-ina2xx.png "SparkFun INA2XX Arduino Library")
+![SparkFun INA2XX Arduino Library](docs/images/Qwiic-Current-Sensor-INA2XX-Arduino.png "SparkFun INA2XX Arduino Library")
 
 # SparkFun INA2XX Arduino Library
 
