@@ -21,7 +21,6 @@ This library provides an easy-to-use interface to both the **INA228** (20-bit, h
 | -- | -- | -- | -- | -- |
 | INA228 | 20-bit | High (312.5 nV shunt LSB) | ✅ 40-bit ENERGY + CHARGE accumulators | Use `SfeINA228ArdI2C` |
 | INA237 | 16-bit | Standard (5 µV shunt LSB) | ❌ | Use `SfeINA237ArdI2C` |
-| INA238 | 16-bit | Standard | ❌ | Register-compatible with the INA237; detected by `SfeINA237ArdI2C` |
 
 ## Functionality
 
